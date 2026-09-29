@@ -1,4 +1,5 @@
 """설정. 거래소 API 키는 환경변수(.env)로만 주입하고 출금 권한은 부여하지 않는다."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,10 +15,10 @@ class Settings(BaseSettings):
     data_dir: Path = Path("data")
     initial_cash_krw: float = 10_000_000
     initial_cash_usd: float = 10_000
-    paper: bool = True                      # False로 바꾸는 것은 관문 통과 후 별도 플로우에서만
+    paper: bool = True  # False로 바꾸는 것은 관문 통과 후 별도 플로우에서만
 
     # 판단 계층
-    judge_provider: str = "stub"            # stub | typesafe | laya
+    judge_provider: str = "stub"  # stub | typesafe | laya
     llm_providers: list[str] = Field(default_factory=lambda: ["stub", "stub"])
     gate_hold_below: float = 0.5
     gate_full_above: float = 0.9

@@ -6,6 +6,7 @@ LLMProvider:   Claude / Gemini. 후보 신호에 대해 approve/hold와 한 줄 
 
 0단계는 인터페이스와 스텁만 있다. 실제 어댑터(TypeSafe SDK, Anthropic SDK, Google GenAI SDK)는 1단계.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -18,6 +19,7 @@ from quantpilot.core.models import Gate, JudgeResult
 @dataclass(frozen=True)
 class Question:
     """원자 질문. kind='choice'는 options 중 하나의 확률 분포, 'score'는 0~1 실수."""
+
     key: str
     prompt: str
     kind: Literal["choice", "score"]
@@ -38,16 +40,21 @@ DEFAULT_QUESTIONS: tuple[Question, ...] = (
 @dataclass
 class State:
     """피처 빌더가 만든 판단 입력. 숫자는 등급·백분위로 변환해 짧게 넣는다 (400토큰 이내 목표)."""
+
     market: str
     symbol: str
     strategy: str
     signal: str
-    features: dict = field(default_factory=dict)      # 예: {"vol_pctl_20d": 78, "ma_score": 0.75, ...}
+    features: dict = field(default_factory=dict)  # 예: {"vol_pctl_20d": 78, "ma_score": 0.75, ...}
     news_summary: str = ""
     events_24h: str = "none"
 
     def render(self) -> str:
-        lines = [f"market: {self.market} {self.symbol}", f"strategy: {self.strategy}", f"signal: {self.signal}"]
+        lines = [
+            f"market: {self.market} {self.symbol}",
+            f"strategy: {self.strategy}",
+            f"signal: {self.signal}",
+        ]
         lines += [f"{k}: {v}" for k, v in self.features.items()]
         lines += [f"news_24h: {self.news_summary or 'none'}", f"events_24h: {self.events_24h}"]
         return "\n".join(lines)
@@ -57,7 +64,9 @@ class JudgeProvider(ABC):
     name: str = "judge"
 
     @abstractmethod
-    def judge(self, state: State, questions: tuple[Question, ...] = DEFAULT_QUESTIONS) -> JudgeResult: ...
+    def judge(
+        self, state: State, questions: tuple[Question, ...] = DEFAULT_QUESTIONS
+    ) -> JudgeResult: ...
 
 
 @dataclass
@@ -85,7 +94,9 @@ def gate(confidence: float, *, hold_below: float = 0.5, full_above: float = 0.9)
     return Gate.HALF
 
 
-def hard_blocks(result: JudgeResult, *, news_risk_max: float = 0.5, event_ahead_max: float = 0.5) -> list[str]:
+def hard_blocks(
+    result: JudgeResult, *, news_risk_max: float = 0.5, event_ahead_max: float = 0.5
+) -> list[str]:
     """확신도와 무관하게 진입을 막는 조건. 코드가 판단한다."""
     reasons = []
     a = result.answers
@@ -101,18 +112,26 @@ class Decision:
     gate: Gate
     blocks: list[str]
     verdicts: list[LLMVerdict]
-    size_multiplier: float          # 0 / 0.5 / 1.0
+    size_multiplier: float  # 0 / 0.5 / 1.0
 
     @property
     def proceed(self) -> bool:
         return self.size_multiplier > 0
 
 
-def decide(judge_result: JudgeResult, verdicts: list[LLMVerdict], *, require_all_llm: bool = True,
-           hold_below: float = 0.5, full_above: float = 0.9) -> Decision:
+def decide(
+    judge_result: JudgeResult,
+    verdicts: list[LLMVerdict],
+    *,
+    require_all_llm: bool = True,
+    hold_below: float = 0.5,
+    full_above: float = 0.9,
+) -> Decision:
     blocks = hard_blocks(judge_result)
     g = gate(judge_result.confidence, hold_below=hold_below, full_above=full_above)
-    llm_ok = all(v.approve for v in verdicts) if require_all_llm else any(v.approve for v in verdicts)
+    llm_ok = (
+        all(v.approve for v in verdicts) if require_all_llm else any(v.approve for v in verdicts)
+    )
     if blocks or g == Gate.HOLD or (verdicts and not llm_ok):
         return Decision(Gate.HOLD, blocks, verdicts, 0.0)
     return Decision(g, blocks, verdicts, 0.5 if g == Gate.HALF else 1.0)

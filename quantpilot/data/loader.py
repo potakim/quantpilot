@@ -7,6 +7,7 @@
 
 모든 로더는 columns=[open, high, low, close, volume], DatetimeIndex(오름차순, tz-naive)를 돌려준다.
 """
+
 from __future__ import annotations
 
 import logging
@@ -26,6 +27,7 @@ class CandleCache:
         self.root.mkdir(parents=True, exist_ok=True)
         try:
             import pyarrow  # noqa: F401
+
             self.ext = "parquet"
         except ImportError:
             self.ext = "csv"
@@ -65,10 +67,12 @@ def _normalize(df: pd.DataFrame) -> pd.DataFrame:
 UPBIT = "https://api.upbit.com/v1"
 
 
-def upbit_candles(market: str, tf: str = "1d", count: int = 1000, *, end: datetime | None = None,
-                  client=None) -> pd.DataFrame:
+def upbit_candles(
+    market: str, tf: str = "1d", count: int = 1000, *, end: datetime | None = None, client=None
+) -> pd.DataFrame:
     """tf: '1d' | '1m' | '5m' | '15m' | '60m' | '1w'. count개(최대 수천)를 200개씩 뒤로 가며 받는다."""
     import httpx
+
     client = client or httpx.Client(timeout=10)
     if tf == "1d":
         url, params = f"{UPBIT}/candles/days", {}
@@ -95,12 +99,19 @@ def upbit_candles(market: str, tf: str = "1d", count: int = 1000, *, end: dateti
             break
         df = pd.DataFrame(rows)
         df["ts"] = pd.to_datetime(df["candle_date_time_kst"])
-        df = df.rename(columns={"opening_price": "open", "high_price": "high", "low_price": "low",
-                                "trade_price": "close", "candle_acc_trade_volume": "volume"}).set_index("ts")
+        df = df.rename(
+            columns={
+                "opening_price": "open",
+                "high_price": "high",
+                "low_price": "low",
+                "trade_price": "close",
+                "candle_acc_trade_volume": "volume",
+            }
+        ).set_index("ts")
         frames.append(df[COLS])
         to = pd.to_datetime(rows[-1]["candle_date_time_utc"]).to_pydatetime()
         remaining -= len(rows)
-        time.sleep(0.11)   # 10 req/s 제한
+        time.sleep(0.11)  # 10 req/s 제한
     if not frames:
         return pd.DataFrame(columns=COLS)
     return _normalize(pd.concat(frames))
@@ -132,8 +143,15 @@ def fdr_daily(code: str, start: str = "2010-01-01", end: str | None = None) -> p
 
 
 # ---------------- 통합 ----------------
-def load(source: str, symbol: str, tf: str = "1d", *, cache: CandleCache | None = None,
-         refresh: bool = False, **kw) -> pd.DataFrame:
+def load(
+    source: str,
+    symbol: str,
+    tf: str = "1d",
+    *,
+    cache: CandleCache | None = None,
+    refresh: bool = False,
+    **kw,
+) -> pd.DataFrame:
     if cache and not refresh:
         hit = cache.load(source, symbol, tf)
         if hit is not None and len(hit):

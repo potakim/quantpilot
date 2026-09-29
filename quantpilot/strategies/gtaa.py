@@ -7,6 +7,7 @@
 
 Faber 1973~2012: MDD 46% → 10% 미만, 수익률은 매수보유와 비슷.
 """
+
 from __future__ import annotations
 
 from quantpilot.core.models import Market, Target
@@ -44,7 +45,9 @@ class GTAA(Strategy):
                 continue
             close = ctx.bars[s]["close"]
             above = float(close.iloc[-1]) > float(close.tail(n).mean())
-            out.append(Target(s, each if above else 0.0, reason=f"close{'>' if above else '<='}ma{n}"))
+            out.append(
+                Target(s, each if above else 0.0, reason=f"close{'>' if above else '<='}ma{n}")
+            )
             if not above:
                 cash_w += each
         cash_sym = self.params["cash_symbol"]

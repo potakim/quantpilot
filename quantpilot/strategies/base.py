@@ -6,11 +6,13 @@
 - `on_bar`는 현재 봉까지의 히스토리를 받는다. Target.price를 지정하는 전략(장중 진입)은
   현재 봉의 종가를 계산에 쓰면 안 된다 (룩어헤드). 현재 봉의 open/high/low만 허용.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 import pandas as pd
 
@@ -20,6 +22,7 @@ from quantpilot.core.models import Market, Position, Target
 @dataclass
 class Context:
     """한 봉 시점의 컨텍스트. bars[symbol] = 현재 봉까지의 OHLCV DataFrame (DatetimeIndex, 오름차순)."""
+
     ts: pd.Timestamp
     bars: Mapping[str, pd.DataFrame]
     positions: Mapping[str, Position]
@@ -54,10 +57,10 @@ class Strategy(ABC):
 
     name: str = "base"
     market: Market = Market.UPBIT
-    timeframe: str = "1d"          # "1d" | "5m" | "1M"(월간 판단)
-    horizon: str = "swing"         # "intraday" | "swing" | "long"  (단타 합산 상한 20% 적용 대상 구분)
+    timeframe: str = "1d"  # "1d" | "5m" | "1M"(월간 판단)
+    horizon: str = "swing"  # "intraday" | "swing" | "long"  (단타 합산 상한 20% 적용 대상 구분)
     symbols: tuple[str, ...] = ()
-    warmup_bars: int = 30          # 이만큼 봉이 쌓이기 전에는 on_bar를 호출하지 않는다
+    warmup_bars: int = 30  # 이만큼 봉이 쌓이기 전에는 on_bar를 호출하지 않는다
 
     def __init__(self, **params: Any):
         schema = {p.name: p for p in self.params_schema()}

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -47,8 +47,10 @@ def test_round_trip_pnl_includes_costs():
     b.on_price("KRW-ETH", 5_000_000)
     b.submit(Order("KRW-ETH", Side.SELL, 1.0))
     assert not b.positions()
-    assert b.cash() < 10_000_000                      # 왕복 비용만큼 손실
-    assert 10_000_000 - b.cash() == pytest.approx(5_000_000 * preset("upbit").round_trip_rate(), rel=1e-3)
+    assert b.cash() < 10_000_000  # 왕복 비용만큼 손실
+    assert 10_000_000 - b.cash() == pytest.approx(
+        5_000_000 * preset("upbit").round_trip_rate(), rel=1e-3
+    )
 
 
 def test_risk_one_percent_rule_sizes_by_stop():
@@ -62,25 +64,40 @@ def test_risk_one_percent_rule_sizes_by_stop():
 
 def test_risk_monthly_circuit_breaker_blocks_entries_but_allows_exits():
     rm = RiskManager()
-    now = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 1, tzinfo=UTC)
     rm.roll_month(10_000_000, now)
-    d = rm.check(Order("KRW-ETH", Side.BUY, 0.1), equity=9_400_000, price=5_000_000, positions={}, now=now)
+    d = rm.check(
+        Order("KRW-ETH", Side.BUY, 0.1), equity=9_400_000, price=5_000_000, positions={}, now=now
+    )
     assert not d.allowed and "monthly_loss" in d.reason
     pos = {"KRW-ETH": Position("KRW-ETH", qty=0.2, avg_price=5_000_000)}
-    d = rm.check(Order("KRW-ETH", Side.SELL, 0.2), equity=9_400_000, price=5_000_000, positions=pos, now=now)
+    d = rm.check(
+        Order("KRW-ETH", Side.SELL, 0.2), equity=9_400_000, price=5_000_000, positions=pos, now=now
+    )
     assert d.allowed and d.reason == "exit"
     # 다음 달이 되면 해제
-    rm.roll_month(9_400_000, datetime(2026, 10, 1, tzinfo=timezone.utc))
-    d = rm.check(Order("KRW-ETH", Side.BUY, 0.1), equity=9_400_000, price=5_000_000, positions={},
-                 now=datetime(2026, 10, 1, tzinfo=timezone.utc))
+    rm.roll_month(9_400_000, datetime(2026, 10, 1, tzinfo=UTC))
+    d = rm.check(
+        Order("KRW-ETH", Side.BUY, 0.1),
+        equity=9_400_000,
+        price=5_000_000,
+        positions={},
+        now=datetime(2026, 10, 1, tzinfo=UTC),
+    )
     assert d.allowed
 
 
 def test_risk_intraday_cap_and_api_errors():
     rm = RiskManager(RiskRules(max_orders_per_symbol_per_sec=100))
-    d = rm.check(Order("QQQ", Side.BUY, 100), equity=10_000, price=100, positions={},
-                 horizon="intraday", intraday_exposure=1_500)
-    assert d.allowed and d.qty == pytest.approx(5.0)      # 20% - 15% = 5% = $500 = 5주
+    d = rm.check(
+        Order("QQQ", Side.BUY, 100),
+        equity=10_000,
+        price=100,
+        positions={},
+        horizon="intraday",
+        intraday_exposure=1_500,
+    )
+    assert d.allowed and d.qty == pytest.approx(5.0)  # 20% - 15% = 5% = $500 = 5주
     for _ in range(3):
         rm.api_error()
     d = rm.check(Order("QQQ", Side.BUY, 1), equity=10_000, price=100, positions={})
@@ -93,6 +110,10 @@ def test_risk_wash_trade_guard():
     rm = RiskManager()
     o = Order("KRW-BTC", Side.BUY, 0.01)
     rm.note_pending(o, True)
-    d = rm.check(Order("KRW-BTC", Side.SELL, 0.01), equity=1e7, price=1e8,
-                 positions={"KRW-BTC": Position("KRW-BTC", 0.01, 1e8)})
+    d = rm.check(
+        Order("KRW-BTC", Side.SELL, 0.01),
+        equity=1e7,
+        price=1e8,
+        positions={"KRW-BTC": Position("KRW-BTC", 0.01, 1e8)},
+    )
     assert not d.allowed and "자전거래" in d.reason

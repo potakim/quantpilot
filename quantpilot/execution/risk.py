@@ -8,12 +8,13 @@
 - 자전거래·허수주문 방지: 같은 종목에 반대 방향 미체결 주문이 있으면 거부, 같은 종목 주문 생성 초당 N건 제한
 - API 오류 연속 3회 → 신규 진입 중단 + 알림 플래그
 """
+
 from __future__ import annotations
 
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from quantpilot.core.models import Order, Position, Side
 
@@ -48,7 +49,7 @@ class RiskManager:
 
     # ---- 월 서킷브레이커 ----
     def roll_month(self, equity: float, now: datetime | None = None) -> None:
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         key = (now.year, now.month)
         if key != self._month:
             self._month, self.month_start_equity = key, equity
@@ -72,7 +73,9 @@ class RiskManager:
             self.halted_reason = ""
 
     # ---- 수량 계산 ----
-    def size_by_risk(self, equity: float, entry: float, stop: float | None, requested_qty: float) -> tuple[float, str]:
+    def size_by_risk(
+        self, equity: float, entry: float, stop: float | None, requested_qty: float
+    ) -> tuple[float, str]:
         """stop이 있으면 1% 룰로 수량 상한. 없으면 요청 수량 그대로."""
         if stop is None or entry <= 0 or abs(entry - stop) <= 0:
             return requested_qty, ""
@@ -82,10 +85,18 @@ class RiskManager:
         return requested_qty, ""
 
     # ---- 주문 검사 ----
-    def check(self, order: Order, *, equity: float, price: float, positions: dict[str, Position],
-              horizon: str = "swing", intraday_exposure: float = 0.0,
-              now: datetime | None = None) -> RiskDecision:
-        now = now or datetime.now(timezone.utc)
+    def check(
+        self,
+        order: Order,
+        *,
+        equity: float,
+        price: float,
+        positions: dict[str, Position],
+        horizon: str = "swing",
+        intraday_exposure: float = 0.0,
+        now: datetime | None = None,
+    ) -> RiskDecision:
+        now = now or datetime.now(UTC)
         self.roll_month(equity, now)
         pos = positions.get(order.symbol)
         is_exit = order.side == Side.SELL and pos is not None and pos.qty > 0
@@ -111,7 +122,9 @@ class RiskManager:
         max_value = self.rules.max_symbol_weight * equity - held_value
         if qty * price > max_value:
             if max_value <= 0:
-                return RiskDecision(False, 0.0, f"종목 비중 상한 {self.rules.max_symbol_weight:.0%} 도달")
+                return RiskDecision(
+                    False, 0.0, f"종목 비중 상한 {self.rules.max_symbol_weight:.0%} 도달"
+                )
             adj.append(f"종목 비중 상한: {qty:.6g} → {max_value / price:.6g}")
             qty = max_value / price
 
@@ -119,7 +132,9 @@ class RiskManager:
             room = self.rules.max_intraday_weight * equity - intraday_exposure
             if qty * price > room:
                 if room <= 0:
-                    return RiskDecision(False, 0.0, f"단타 합산 상한 {self.rules.max_intraday_weight:.0%} 도달")
+                    return RiskDecision(
+                        False, 0.0, f"단타 합산 상한 {self.rules.max_intraday_weight:.0%} 도달"
+                    )
                 adj.append(f"단타 합산 상한: {qty:.6g} → {room / price:.6g}")
                 qty = room / price
 

@@ -9,6 +9,7 @@
 페이퍼 전용. 실전 전환은 관문 G2(슬리피지 포함 Sharpe > 0.5) 통과 후.
 숏은 국내 증권사 해외주식 계좌에서 불가하므로 기본 롱 전용(allow_short=False).
 """
+
 from __future__ import annotations
 
 import pandas as pd
@@ -44,7 +45,7 @@ class OpeningRangeBreakout(Strategy):
             ts: pd.Timestamp = df.index[-1]
             day = df[df.index.normalize() == ts.normalize()]
             if len(day) < 2:
-                continue                                   # 첫 봉이 끝나기 전
+                continue  # 첫 봉이 끝나기 전
             first = day.iloc[0]
             pos = ctx.positions.get(sym)
             hhmm = ts.strftime("%H:%M")
@@ -68,21 +69,34 @@ class OpeningRangeBreakout(Strategy):
                     continue
                 # 비중은 리스크 기준: weight = risk / (r / entry). RiskManager가 다시 상한을 건다.
                 weight = min(1.0, float(self.params["risk_per_trade"]) / (r / entry))
-                out.append(Target(sym, weight if bullish else -weight, price=entry, stop=stop,
-                                  reason=f"orb {'long' if bullish else 'short'} R={r:.2f}"))
+                out.append(
+                    Target(
+                        sym,
+                        weight if bullish else -weight,
+                        price=entry,
+                        stop=stop,
+                        reason=f"orb {'long' if bullish else 'short'} R={r:.2f}",
+                    )
+                )
                 continue
 
             # 손절 / 목표
             if pos is not None and pos.is_open:
                 entry = pos.avg_price
                 if pos.qty > 0:
-                    stop, target = float(first["low"]), entry + self.params["target_r"] * (entry - float(first["low"]))
+                    stop, target = (
+                        float(first["low"]),
+                        entry + self.params["target_r"] * (entry - float(first["low"])),
+                    )
                     if float(cur["low"]) <= stop:
                         out.append(Target(sym, 0.0, price=stop, reason="stop"))
                     elif float(cur["high"]) >= target:
                         out.append(Target(sym, 0.0, price=target, reason="target_10R"))
                 else:
-                    stop, target = float(first["high"]), entry - self.params["target_r"] * (float(first["high"]) - entry)
+                    stop, target = (
+                        float(first["high"]),
+                        entry - self.params["target_r"] * (float(first["high"]) - entry),
+                    )
                     if float(cur["high"]) >= stop:
                         out.append(Target(sym, 0.0, price=stop, reason="stop"))
                     elif float(cur["low"]) <= target:

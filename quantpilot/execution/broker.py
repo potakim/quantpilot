@@ -2,10 +2,11 @@
 
 실전 어댑터(pyupbit, python-kis, alpaca-py)는 1~2단계에서 붙인다. 0단계는 PaperBroker만 있다.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Mapping
+from collections.abc import Mapping
 
 from quantpilot.core.models import Fill, Market, Order, Position
 
@@ -30,7 +31,9 @@ class BrokerAdapter(ABC):
     def last_price(self, symbol: str) -> float: ...
 
     def equity(self) -> float:
-        return self.cash() + sum(p.qty * self.last_price(s) for s, p in self.positions().items() if p.is_open)
+        return self.cash() + sum(
+            p.qty * self.last_price(s) for s, p in self.positions().items() if p.is_open
+        )
 
     @property
     def is_paper(self) -> bool:

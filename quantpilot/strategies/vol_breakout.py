@@ -9,6 +9,7 @@
 
 출처: hive.blog/kr/@kangcfa/6-mdd-10-1 (0.5% 타겟 + 5일선 필터: 연 17.4%, MDD 6.5%, BTC 2013.10~2018.3)
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -29,7 +30,9 @@ class VolBreakout(Strategy):
     def params_schema(cls) -> list[ParamSpec]:
         return [
             ParamSpec("k", 0.5, 0.3, 0.8, 0.05, description="돌파 계수 K"),
-            ParamSpec("target_vol", 0.01, 0.002, 0.03, 0.001, description="목표 변동성 (일간, 0.01=1%)"),
+            ParamSpec(
+                "target_vol", 0.01, 0.002, 0.03, 0.001, description="목표 변동성 (일간, 0.01=1%)"
+            ),
             ParamSpec("ma_windows", (3, 5, 10, 20), description="이평 스코어 윈도우"),
             ParamSpec("noise_k", False, choices=(True, False), description="노이즈 K 사용"),
             ParamSpec("max_weight", 1.0, 0.1, 1.0, 0.1, description="코인 하나의 최대 비중"),
@@ -53,7 +56,9 @@ class VolBreakout(Strategy):
 
             k = float(self.params["k"])
             if self.params["noise_k"]:
-                noise = 1 - (prev["open"] - prev["close"]).abs() / (prev["high"] - prev["low"]).replace(0, np.nan)
+                noise = 1 - (prev["open"] - prev["close"]).abs() / (
+                    prev["high"] - prev["low"]
+                ).replace(0, np.nan)
                 k = float(noise.tail(20).mean()) if noise.tail(20).notna().any() else k
 
             target_price = float(cur["open"]) + rng * k
@@ -74,7 +79,13 @@ class VolBreakout(Strategy):
             # 2) 오늘 고가가 목표가에 닿았으면 목표가에 진입 (하루 1회)
             hit = float(cur["high"]) >= target_price
             if hit and weight > 0:
-                out.append(Target(sym, weight, price=target_price,
-                                  reason=f"breakout k={k:.2f} score={score:.2f} vol={vol_pct:.3%}",
-                                  stop=target_price * (1 - 2 * vol_pct)))
+                out.append(
+                    Target(
+                        sym,
+                        weight,
+                        price=target_price,
+                        reason=f"breakout k={k:.2f} score={score:.2f} vol={vol_pct:.3%}",
+                        stop=target_price * (1 - 2 * vol_pct),
+                    )
+                )
         return out

@@ -22,6 +22,48 @@ class BuyAndHold(Strategy):
         return [Target("X", 1.0)] if not ctx.positions.get("X") else []
 
 
+def test_synthetic_seed_is_stable_across_processes():
+    """내장 hash()는 PYTHONHASHSEED마다 바뀐다. 합성 데이터는 프로세스가 달라도 같아야 한다."""
+    import os
+    import subprocess
+    import sys
+
+    code = ("from quantpilot.data import synthetic as S;"
+            "print(S.seed_of('SPY'), S.universe(('SPY',), periods=50)['SPY']['close'].iloc[-1])")
+    outs = {subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True,
+                           env={**os.environ, "PYTHONHASHSEED": seed}).stdout for seed in ("1", "2")}
+    assert len(outs) == 1
+
+
+def test_sells_fill_before_buys_in_same_bar():
+    """전략이 매수를 먼저 적어도 엔진은 매도부터 체결해 현금이 놀지 않아야 한다 (청산 우선)."""
+    idx = pd.date_range("2021-01-01", periods=3)
+    flat = pd.DataFrame({"open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 1.0},
+                        index=idx)
+
+    class Switch(Strategy):
+        name = "switch"
+        market = Market.US
+        symbols = ("A", "B")
+        warmup_bars = 1
+
+        @classmethod
+        def params_schema(cls):
+            return []
+
+        def on_bar(self, ctx):
+            if ctx.ts == idx[0]:
+                return [Target("A", 1.0)]
+            if ctx.ts == idx[1]:
+                return [Target("B", 1.0), Target("A", 0.0)]        # 매수를 먼저 적는다
+            return []
+
+    res = Backtester(ZERO, 1_000_000, holdout_months=0, allow_zero_cost=True).run(
+        Switch(), {"A": flat, "B": flat.copy()})
+    buy_b = [f for f in res.fills if f.symbol == "B"]
+    assert buy_b and buy_b[0].qty * buy_b[0].price == pytest.approx(1_000_000)
+
+
 def test_zero_cost_requires_explicit_flag():
     with pytest.raises(ValueError):
         Backtester(ZERO)
@@ -83,6 +125,16 @@ def test_attempt_tracker_warns_after_seven(tmp_path):
     assert info["distinct_attempts"] == 8 and info["overfit_warning"]
     info = t.record("vol_breakout", {"k": 0.3}, ("KRW-BTC",))     # 같은 조합 재실행은 안 센다
     assert info["distinct_attempts"] == 8
+
+
+@pytest.mark.parametrize("name", sorted(REGISTRY))
+def test_cli_backtest_runs_on_synthetic(name, tmp_path, monkeypatch):
+    """CLI 합성 데이터 경로 (5분봉 전략은 seed_of를 쓴다)."""
+    from quantpilot import cli
+    from quantpilot.config import settings
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    assert cli.main(["backtest", name]) == 0
 
 
 def test_param_validation():

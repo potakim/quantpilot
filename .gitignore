@@ -2,8 +2,19 @@
 __pycache__/
 *.pyc
 .env
-data/
+/data/
 .pytest_cache/
 .ruff_cache/
 dist/
 *.egg-info/
+
+# MoAI · Claude Code 런타임 산출물 (실행 중 재생성, .moai/README.md 참고)
+.moai/cache/
+.moai/temp/
+.moai/logs/*
+!.moai/logs/.gitkeep
+.moai/state/*
+!.moai/state/.gitkeep
+.moai/reports/**/*.md
+.claude/settings.local.json
+.claude/worktrees/

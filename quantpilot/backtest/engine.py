@@ -81,6 +81,16 @@ class Backtester:
             month_last = {t for t in month_last if t <= cutoff}   # 컷으로 생긴 부분월은 월말이 아니다
         return out, cutoff, month_last
 
+    @staticmethod
+    def _increases(t: Target, visible: Mapping[str, pd.DataFrame], positions: Mapping[str, Position],
+                   equity: float) -> bool:
+        """이 Target이 현재 보유 가치보다 비중을 늘리는 주문인지 (체결 순서 정렬용)."""
+        if t.weight == 0 or t.symbol not in visible:
+            return False
+        pos = positions.get(t.symbol)
+        held = pos.qty * float(visible[t.symbol]["close"].iloc[-1]) if pos else 0.0
+        return t.weight * equity > held
+
     # ---------- 실행 ----------
     def run(self, strategy: Strategy, data: Mapping[str, pd.DataFrame],
             attempts=None) -> BacktestResult:
@@ -121,6 +131,11 @@ class Backtester:
             if ready and (not monthly or ts in month_last):
                 ctx = Context(ts=ts, bars=visible, positions=positions, equity=equity, params=strategy.params)
                 targets = strategy.on_bar(ctx) or []
+
+            # 청산 우선: 비중을 줄이는 주문을 먼저 체결해야 그 현금으로 늘리는 주문을 낼 수 있다.
+            # 정렬은 안정적이라 같은 그룹 안에서는 전략이 준 순서를 지킨다.
+            grows = [self._increases(t, visible, positions, equity) for t in targets]
+            targets = [t for _, t in sorted(zip(grows, targets), key=lambda p: p[0])]
 
             for t in targets:
                 if t.symbol not in visible or visible[t.symbol].index[-1] != ts:

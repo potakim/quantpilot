@@ -1,7 +1,7 @@
 # CLAUDE.md — QuantPilot 작업 지침
 
 초보자용 AI 퀀트 트레이딩 플랫폼. **코드가 계산하고, 모델은 판단하고, 코드가 실행한다.**
-작업 전에 `docs/00-overview.md`를 읽고, 맡은 영역의 문서(`docs/04-modules.md` 등)를 확인한다.
+작업 전에 `docs/00-overview.md`를 읽고, 맡은 영역의 문서(`docs/04-modules.md` 등)를 확인한다. 프론트 작업은 `docs/10-ui-design.md`와 `docs/design/*.dc.html`(화면 원본)을 반드시 연다. 기획 배경은 `docs/90-planning-brief.md`.
 
 ## 명령
 

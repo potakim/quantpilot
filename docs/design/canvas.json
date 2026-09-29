@@ -1,0 +1,21 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-09-28T07:40:00Z"},
+  "title": "QuantPilot 화면 디자인",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 900, "title": "대시보드", "is_interactive": true},
+    "Trade.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 900, "title": "거래 · 차트 · AI 판단", "is_interactive": true},
+    "Strategy.dc.html": {"x": 3040, "y": 0, "w": 1440, "h": 900, "title": "전략 설정", "is_interactive": true},
+    "AILog.dc.html": {"x": 0, "y": 1020, "w": 1440, "h": 900, "title": "AI 판단 로그", "is_interactive": true},
+    "Backtest.dc.html": {"x": 1520, "y": 1020, "w": 1440, "h": 900, "title": "백테스트", "is_interactive": true},
+    "Mobile.dc.html": {"x": 3040, "y": 1020, "w": 390, "h": 844, "title": "모바일 대시보드"}
+  },
+  "order": ["Main.dc.html", "Trade.dc.html", "Strategy.dc.html", "AILog.dc.html", "Backtest.dc.html", "Mobile.dc.html"],
+  "notes": {
+    "t1": {"x": 0, "y": -300, "text": "QuantPilot — 초보자용 AI 퀀트 트레이딩 플랫폼 화면 설계", "kind": "title1", "maxW": 4480},
+    "n1": {"x": 3520, "y": 1020, "w": 360, "text": "화면의 계좌·손익 숫자는 구성 확인용 샘플입니다. 백테스트 화면의 성과 수치만 기획서에 인용한 공개 자료(Petit 2026 GEM 재현, 강환국 변동성 돌파) 기준입니다.\n\n색 규칙: 상승 빨강 / 하락 파랑(국내 관행), AI 판단 요소는 보라, 리스크 경고는 주황.", "fill": "orange"}
+  },
+  "designSystems": []
+}

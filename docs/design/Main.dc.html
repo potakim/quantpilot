@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>QuantPilot 대시보드</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#0B0F14;font-family:'IBM Plex Sans KR',system-ui,sans-serif;color:#E8EDF3}
+a{color:#8B7CF6}a:hover{color:#A99CFF}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; display: flex; flex-direction: column; background: #0B0F14; color: #E8EDF3; font-family: 'IBM Plex Sans KR', system-ui, sans-serif; font-variant-numeric: tabular-nums">
+
+  <header style="height: 56px; box-sizing: border-box; display: flex; align-items: center; gap: 24px; padding: 0 24px; border-bottom: 1px solid #253040; background: #0F141B">
+    <div style="display: flex; align-items: center; gap: 10px; width: 196px">
+      <div style="width: 26px; height: 26px; border-radius: 8px; background: {{accent}}; display: flex; align-items: center; justify-content: center; color: #0B0F14; font-weight: 700; font-size: 14px">Q</div>
+      <div style="font-size: 16px; font-weight: 700; letter-spacing: -0.2px">QuantPilot</div>
+    </div>
+    <div style="display: flex; gap: 4px; padding: 4px; border-radius: 10px; background: #121820; border: 1px solid #253040">
+      <button style="height: 30px; padding: 0 14px; border-radius: 7px; border: 0; background: #1A222C; color: #E8EDF3; font-size: 13px; font-weight: 600; font-family: inherit">전체</button>
+      <button style="height: 30px; padding: 0 14px; border-radius: 7px; border: 0; background: transparent; color: #8A96A6; font-size: 13px; font-weight: 500; font-family: inherit">코인</button>
+      <button style="height: 30px; padding: 0 14px; border-radius: 7px; border: 0; background: transparent; color: #8A96A6; font-size: 13px; font-weight: 500; font-family: inherit">국내주식</button>
+      <button style="height: 30px; padding: 0 14px; border-radius: 7px; border: 0; background: transparent; color: #8A96A6; font-size: 13px; font-weight: 500; font-family: inherit">미국주식</button>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; border: 1px solid #7A5A14; background: #2A2110; color: #F5C57A; font-size: 12px; font-weight: 600">
+      <span style="width: 8px; height: 8px; border-radius: 50%; background: #F5A524"></span>
+      페이퍼 모드 · 실전 전환 관문 G2 대기
+    </div>
+    <div style="flex-grow: 1"></div>
+    <div style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #8A96A6">2026-09-28 (월) 14:32 KST</div>
+    <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #8A96A6"><span style="width: 8px; height: 8px; border-radius: 50%; background: #2ECC8A"></span>업비트 · KIS 연결됨</div>
+    <button aria-label="알림" style="width: 36px; height: 36px; border-radius: 10px; border: 1px solid #253040; background: #121820; color: #C5CDD8; display: flex; align-items: center; justify-content: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"></path><path d="M10 21h4"></path></svg></button>
+    <div style="width: 36px; height: 36px; border-radius: 50%; background: #1A222C; border: 1px solid #253040; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; color: #C5CDD8">김</div>
+  </header>
+
+  <div style="display: flex; flex-grow: 1; min-height: 0">
+    <nav style="width: 220px; box-sizing: border-box; padding: 16px 12px; border-right: 1px solid #253040; background: #0F141B; display: flex; flex-direction: column; gap: 4px">
+      <a href="Main.dc.html" style="display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; background: #1A222C; color: #E8EDF3; text-decoration: none; font-size: 14px; font-weight: 600"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg>대시보드</a>
+      <a href="Trade.dc.html" style="display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; color: #8A96A6; text-decoration: none; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v3M7 17v3M17 4v4M17 15v5"></path><rect x="4" y="7" width="6" height="10" rx="1"></rect><rect x="14" y="8" width="6" height="7" rx="1"></rect></svg>거래 · 차트</a>
+      <a href="Strategy.dc.html" style="display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; color: #8A96A6; text-decoration: none; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"></path><circle cx="16" cy="7" r="2"></circle><circle cx="10" cy="17" r="2"></circle></svg>전략 설정</a>
+      <a href="AILog.dc.html" style="display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; color: #8A96A6; text-decoration: none; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path><path d="M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"></path></svg>AI 판단 로그</a>
+      <a href="Backtest.dc.html" style="display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; color: #8A96A6; text-decoration: none; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path><path d="M12 7v5l3 2"></path></svg>백테스트</a>
+      <a href="#portfolio" style="display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; color: #8A96A6; text-decoration: none; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 3v9h9"></path></svg>포트폴리오</a>
+      <div style="flex-grow: 1"></div>
+      <div style="padding: 14px; border-radius: 12px; background: #121820; border: 1px solid #253040; display: flex; flex-direction: column; gap: 8px">
+        <div style="font-size: 12px; color: #8A96A6">월 손실 한도 (서킷브레이커)</div>
+        <div style="display: flex; justify-content: space-between; font-size: 13px"><span style="font-weight: 600">−1.2%</span><span style="color: #8A96A6">한도 −5%</span></div>
+        <div style="height: 6px; border-radius: 3px; background: #1A222C; overflow: hidden"><div style="width: 24%; height: 6px; background: #F5A524"></div></div>
+        <div style="font-size: 11px; color: #8A96A6">한도 도달 시 이번 달 신규 진입이 자동 중단됩니다</div>
+      </div>
+      <a href="#settings" style="display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; color: #8A96A6; text-decoration: none; font-size: 14px; font-weight: 500"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"></path></svg>설정 · API 키</a>
+    </nav>
+
+    <main style="flex-grow: 1; box-sizing: border-box; padding: 24px; display: flex; flex-direction: column; gap: 20px; min-width: 0">
+
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px">
+        <div style="padding: 18px 20px; border-radius: 14px; background: #121820; border: 1px solid #253040; display: flex; flex-direction: column; gap: 6px">
+          <div style="font-size: 12px; color: #8A96A6">총 자산 (페이퍼)</div>
+          <div style="font-size: 26px; font-weight: 700; font-family: 'IBM Plex Mono', monospace">₩52,480,000</div>
+          <div style="font-size: 12px; color: #F4516C">▲ 1.8% 이번 주</div>
+        </div>
+        <div style="padding: 18px 20px; border-radius: 14px; background: #121820; border: 1px solid #253040; display: flex; flex-direction: column; gap: 6px">
+          <div style="font-size: 12px; color: #8A96A6">오늘 손익</div>
+          <div style="font-size: 26px; font-weight: 700; font-family: 'IBM Plex Mono', monospace; color: #F4516C">+₩312,400</div>
+          <div style="font-size: 12px; color: #8A96A6">+0.6% · 체결 3건 · 수수료 ₩4,120</div>
+        </div>
+        <div style="padding: 18px 20px; border-radius: 14px; background: #121820; border: 1px solid #253040; display: flex; flex-direction: column; gap: 6px">
+          <div style="font-size: 12px; color: #8A96A6">실행 중 전략</div>
+          <div style="font-size: 26px; font-weight: 700; font-family: 'IBM Plex Mono', monospace">3 <span style="font-size: 14px; color: #8A96A6; font-weight: 500">/ 4</span></div>
+          <div style="font-size: 12px; color: #8A96A6">ORB는 페이퍼 검증 중 (G2 미통과)</div>
+        </div>
+        <div style="padding: 18px 20px; border-radius: 14px; background: #121820; border: 1px solid #2E2A4D; display: flex; flex-direction: column; gap: 6px">
+          <div style="font-size: 12px; color: #8A96A6; display: flex; align-items: center; gap: 6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8B7CF6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path></svg>AI 판단 오늘</div>
+          <div style="font-size: 26px; font-weight: 700; font-family: 'IBM Plex Mono', monospace">27회 <span style="font-size: 14px; color: #8A96A6; font-weight: 500">진입 2 · 보류 5</span></div>
+          <div style="font-size: 12px; color: #8A96A6">판단 모델 평균 확신도 0.81 · 비용 $0.19</div>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px">
+        <div style="padding: 20px; border-radius: 14px; background: #121820; border: 1px solid #253040; display: flex; flex-direction: column; gap: 12px">
+          <div style="display: flex; align-items: center; justify-content: space-between">
+            <div style="display: flex; flex-direction: column; gap: 2px">
+              <div style="font-size: 15px; font-weight: 600">자산 곡선 · 최근 30일</div>
+              <div style="font-size: 12px; color: #8A96A6">전략 합산 vs BTC 보유 (같은 자본)</div>
+            </div>
+            <div style="display: flex; gap: 4px">
+              <button style="height: 28px; padding: 0 12px; border-radius: 7px; border: 1px solid #253040; background: #1A222C; color: #E8EDF3; font-size: 12px; font-weight: 600; font-family: inherit">30일</button>
+              <button style="height: 28px; padding: 0 12px; border-radius: 7px; border: 1px solid #253040; background: transparent; color: #8A96A6; font-size: 12px; font-family: inherit">90일</button>
+              <button style="height: 28px; padding: 0 12px; border-radius: 7px; border: 1px solid #253040; background: transparent; color: #8A96A6; font-size: 12px; font-family: inherit">1년</button>
+            </div>
+          </div>
+          <svg width="100%" height="212" viewBox="0 0 880 212" role="img" aria-label="최근 30일 자산 곡선">
+            <g stroke="#1E2734" stroke-width="1">
+              <line x1="0" y1="40" x2="880" y2="40"></line><line x1="0" y1="90" x2="880" y2="90"></line><line x1="0" y1="140" x2="880" y2="140"></line><line x1="0" y1="190" x2="880" y2="190"></line>
+            </g>
+            <g fill="#5C6878" font-size="11" font-family="IBM Plex Mono, monospace">
+              <text x="0" y="207">9/1</text><text x="290" y="207">9/10</text><text x="580" y="207">9/20</text><text x="852" y="207">9/28</text>
+            </g>
+            <polyline fill="none" stroke="#4A5566" stroke-width="1.5" stroke-dasharray="4 4" points="0,160 30,162 61,155 91,158 121,150 152,154 182,148 212,150 243,144 273,150 303,146 334,140 364,142 394,138 425,144 455,136 485,132 516,136 546,130 576,134 607,128 637,130 667,126 698,128 728,122 758,124 789,118 819,120 849,116 880,112"></polyline>
+            <polyline fill="none" stroke="{{accent}}" stroke-width="2.5" stroke-linejoin="round" points="0,160 30,158 61,150 91,152 121,140 152,138 182,142 212,130 243,126 273,128 303,118 334,120 364,112 394,108 425,110 455,100 485,96 516,98 546,90 576,92 607,86 637,88 667,80 698,84 728,76 758,72 789,74 819,66 849,62 880,58"></polyline>
+            <circle cx="880" cy="58" r="4" fill="{{accent}}"></circle>
+            <text x="800" y="52" fill="#E8EDF3" font-size="12" font-weight="600">+9.4%</text>
+            <text x="810" y="106" fill="#8A96A6" font-size="12">BTC +4.1%</text>
+          </svg>
+        </div>
+
+        <div style="padding: 20px; border-radius: 14px; background: #121820; border: 1px solid #253040; display: flex; flex-direction: column; gap: 14px">
+          <div style="font-size: 15px; font-weight: 600">오늘 일정 (KST)</div>
+          <div style="display: flex; flex-direction: column; gap: 12px">
+            <div style="display: flex; gap: 12px; align-items: flex-start">
+              <div style="width: 48px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #8A96A6">09:00</div>
+              <div style="width: 10px; height: 10px; border-radius: 50%; background: #2ECC8A; margin-top: 4px"></div>
+              <div style="display: flex; flex-direction: column; gap: 2px"><div style="font-size: 13px; font-weight: 500">업비트 전일분 청산 · 목표가 재계산</div><div style="font-size: 12px; color: #8A96A6">완료 · BTC 목표가 ₩142,860,000</div></div>
+            </div>
+            <div style="display: flex; gap: 12px; align-items: flex-start">
+              <div style="width: 48px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #8A96A6">11:42</div>
+              <div style="width: 10px; height: 10px; border-radius: 50%; background: #2ECC8A; margin-top: 4px"></div>
+              <div style="display: flex; flex-direction: column; gap: 2px"><div style="font-size: 13px; font-weight: 500">ETH 변동성 돌파 진입</div><div style="font-size: 12px; color: #8A96A6">확신도 0.88 · Claude ✓ Gemini ✓ · 비중 50%</div></div>
+            </div>
+            <div style="display: flex; gap: 12px; align-items: flex-start">
+              <div style="width: 48px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #E8EDF3; font-weight: 600">15:20</div>
+              <div style="width: 10px; height: 10px; border-radius: 50%; background: {{accent}}; margin-top: 4px"></div>
+              <div style="display: flex; flex-direction: column; gap: 2px"><div style="font-size: 13px; font-weight: 500">KRX 종가 단일가 주문 (예정)</div><div style="font-size: 12px; color: #8A96A6">스윙 2종목 청산 · GEM 월말 아님</div></div>
+            </div>
+            <div style="display: flex; gap: 12px; align-items: flex-start">
+              <div style="width: 48px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #8A96A6">20:30</div>
+              <div style="width: 10px; height: 10px; border-radius: 50%; border: 2px solid #4A5566; box-sizing: border-box; margin-top: 4px"></div>
+              <div style="display: flex; flex-direction: column; gap: 2px"><div style="font-size: 13px; font-weight: 500">AI 사후 리뷰 · 매매 일지</div><div style="font-size: 12px; color: #8A96A6">Claude가 오늘 매매를 해설</div></div>
+            </div>
+            <div style="display: flex; gap: 12px; align-items: flex-start">
+              <div style="width: 48px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #8A96A6">22:35</div>
+              <div style="width: 10px; height: 10px; border-radius: 50%; border: 2px solid #4A5566; box-sizing: border-box; margin-top: 4px"></div>
+              <div style="display: flex; flex-direction: column; gap: 2px"><div style="font-size: 13px; font-weight: 500">QQQ 5분 ORB 진입 대기 (페이퍼)</div><div style="font-size: 12px; color: #8A96A6">CPI 발표일 아님 · event_ahead 0.08</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; flex-grow: 1; min-height: 0">
+        <div style="padding: 20px; border-radius: 14px; background: #121820; border: 1px solid #253040; display: flex; flex-direction: column; gap: 12px">
+          <div style="display: flex; align-items: center; justify-content: space-between">
+            <div style="font-size: 15px; font-weight: 600">활성 전략</div>
+            <a href="Strategy.dc.html" style="font-size: 13px; font-weight: 500; text-decoration: none">전략 설정 →</a>
+          </div>
+          <div style="display: grid; grid-template-columns: 1.6fr 1fr 0.8fr 1.2fr 1fr 0.9fr; gap: 12px; padding: 0 8px 8px; border-bottom: 1px solid #253040; font-size: 12px; color: #8A96A6">
+            <div>전략</div><div>시장</div><div>상태</div><div>포지션</div><div>이번 달</div><div>MDD</div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1.6fr 1fr 0.8fr 1.2fr 1fr 0.9fr; gap: 12px; padding: 10px 8px; align-items: center; font-size: 13px">
+            <div style="font-weight: 600">변동성 돌파 + 이평 필터</div><div style="color: #8A96A6">업비트 · 5코인</div>
+            <button role="switch" aria-checked="true" aria-label="변동성 돌파 켜기" style="width: 40px; height: 22px; border-radius: 11px; border: 0; background: #2ECC8A; position: relative; padding: 0"><span style="position: absolute; top: 3px; right: 3px; width: 16px; height: 16px; border-radius: 50%; background: #0B0F14"></span></button>
+            <div>ETH 롱 · 50%</div><div style="color: #F4516C; font-family: 'IBM Plex Mono', monospace">+3.2%</div><div style="font-family: 'IBM Plex Mono', monospace; color: #8A96A6">−2.1%</div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1.6fr 1fr 0.8fr 1.2fr 1fr 0.9fr; gap: 12px; padding: 10px 8px; align-items: center; font-size: 13px; border-top: 1px solid #1A222C">
+            <div style="font-weight: 600">듀얼 모멘텀 GEM (6/9/12)</div><div style="color: #8A96A6">KIS · 미국 ETF</div>
+            <button role="switch" aria-checked="true" aria-label="GEM 켜기" style="width: 40px; height: 22px; border-radius: 11px; border: 0; background: #2ECC8A; position: relative; padding: 0"><span style="position: absolute; top: 3px; right: 3px; width: 16px; height: 16px; border-radius: 50%; background: #0B0F14"></span></button>
+            <div>SPY 100%</div><div style="color: #F4516C; font-family: 'IBM Plex Mono', monospace">+1.1%</div><div style="font-family: 'IBM Plex Mono', monospace; color: #8A96A6">−0.8%</div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1.6fr 1fr 0.8fr 1.2fr 1fr 0.9fr; gap: 12px; padding: 10px 8px; align-items: center; font-size: 13px; border-top: 1px solid #1A222C">
+            <div style="font-weight: 600">10개월선 자산배분 GTAA</div><div style="color: #8A96A6">KIS · 국내 ETF</div>
+            <button role="switch" aria-checked="true" aria-label="GTAA 켜기" style="width: 40px; height: 22px; border-radius: 11px; border: 0; background: #2ECC8A; position: relative; padding: 0"><span style="position: absolute; top: 3px; right: 3px; width: 16px; height: 16px; border-radius: 50%; background: #0B0F14"></span></button>
+            <div>4/5 자산 보유</div><div style="color: #4F8CFF; font-family: 'IBM Plex Mono', monospace">−0.4%</div><div style="font-family: 'IBM Plex Mono', monospace; color: #8A96A6">−1.5%</div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1.6fr 1fr 0.8fr 1.2fr 1fr 0.9fr; gap: 12px; padding: 10px 8px; align-items: center; font-size: 13px; border-top: 1px solid #1A222C">
+            <div style="font-weight: 600; display: flex; align-items: center; gap: 8px">5분 ORB <span style="font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #2A2110; color: #F5C57A; font-weight: 600">페이퍼만</span></div><div style="color: #8A96A6">Alpaca · QQQ</div>
+            <button role="switch" aria-checked="false" aria-label="ORB 켜기" style="width: 40px; height: 22px; border-radius: 11px; border: 0; background: #2A3442; position: relative; padding: 0"><span style="position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #8A96A6"></span></button>
+            <div style="color: #8A96A6">없음</div><div style="color: #4F8CFF; font-family: 'IBM Plex Mono', monospace">−1.9%</div><div style="font-family: 'IBM Plex Mono', monospace; color: #8A96A6">−4.6%</div>
+          </div>
+        </div>
+
+        <div style="padding: 20px; border-radius: 14px; background: #121820; border: 1px solid #2E2A4D; display: flex; flex-direction: column; gap: 12px">
+          <div style="display: flex; align-items: center; justify-content: space-between">
+            <div style="font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8B7CF6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path></svg>최근 AI 판단</div>
+            <a href="AILog.dc.html" style="font-size: 13px; font-weight: 500; text-decoration: none">전체 로그 →</a>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 10px">
+            <div style="padding: 12px; border-radius: 10px; background: #1A222C; display: flex; flex-direction: column; gap: 6px">
+              <div style="display: flex; justify-content: space-between; font-size: 12px"><span style="color: #8A96A6; font-family: 'IBM Plex Mono', monospace">14:05</span><span style="color: #2ECC8A; font-weight: 600">진입</span></div>
+              <div style="font-size: 13px; font-weight: 600">ETH · 변동성 돌파</div>
+              <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #8A96A6">확신도<div style="flex-grow: 1; height: 5px; border-radius: 3px; background: #0B0F14; overflow: hidden"><div style="width: 88%; height: 5px; background: #8B7CF6"></div></div><span style="font-family: 'IBM Plex Mono', monospace; color: #E8EDF3">0.88</span></div>
+              <div style="display: flex; gap: 6px; font-size: 11px"><span style="padding: 2px 8px; border-radius: 999px; background: #123626; color: #6EE7B7; font-weight: 600">Claude 승인</span><span style="padding: 2px 8px; border-radius: 999px; background: #123626; color: #6EE7B7; font-weight: 600">Gemini 승인</span></div>
+            </div>
+            <div style="padding: 12px; border-radius: 10px; background: #1A222C; display: flex; flex-direction: column; gap: 6px">
+              <div style="display: flex; justify-content: space-between; font-size: 12px"><span style="color: #8A96A6; font-family: 'IBM Plex Mono', monospace">13:30</span><span style="color: #F5A524; font-weight: 600">보류</span></div>
+              <div style="font-size: 13px; font-weight: 600">SOL · 변동성 돌파</div>
+              <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #8A96A6">확신도<div style="flex-grow: 1; height: 5px; border-radius: 3px; background: #0B0F14; overflow: hidden"><div style="width: 41%; height: 5px; background: #8B7CF6"></div></div><span style="font-family: 'IBM Plex Mono', monospace; color: #E8EDF3">0.41</span></div>
+              <div style="font-size: 12px; color: #8A96A6">news_risk 0.63 · 거래소 상장폐지 검토 기사</div>
+            </div>
+            <div style="padding: 12px; border-radius: 10px; background: #1A222C; display: flex; flex-direction: column; gap: 6px">
+              <div style="display: flex; justify-content: space-between; font-size: 12px"><span style="color: #8A96A6; font-family: 'IBM Plex Mono', monospace">11:42</span><span style="color: #F5A524; font-weight: 600">보류</span></div>
+              <div style="font-size: 13px; font-weight: 600">XRP · 변동성 돌파</div>
+              <div style="display: flex; gap: 6px; font-size: 11px"><span style="padding: 2px 8px; border-radius: 999px; background: #123626; color: #6EE7B7; font-weight: 600">Claude 승인</span><span style="padding: 2px 8px; border-radius: 999px; background: #3A2410; color: #F5C57A; font-weight: 600">Gemini 보류</span></div>
+              <div style="font-size: 12px; color: #8A96A6">두 모델 불일치 → 규칙상 관망</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#8B7CF6","options":["#8B7CF6","#22D3A5","#F5A524","#4F8CFF"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#8B7CF6' };
+  }
+}
+</script>
+</body>
+</html>

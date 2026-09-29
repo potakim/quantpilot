@@ -18,7 +18,7 @@
 | P1-10 | Reconciler + 알림 | 04 §5.4, 07 §6 | `execution/reconciler.py`, `notify/telegram.py` | 불일치 → 할트 테스트, critical 반복 알림 테스트 | 07 §7.3 |
 | P1-11 | 보정 지표 + A/B 섀도 원장 + 리포트 | 06 §6 | `judgment/calibration.py`, 섀도 PaperBroker, `qp report ab` | Brier·ECE 손계산 fixture와 일치, 섀도 원장이 ON과 같은 신호 수 | 06 §6, 08 §5 |
 | P1-12 | API v1 재구성 + WS 허브 | 03 | `api/routes/*.py`, `api/ws.py`, JWT | 03 문서의 모든 엔드포인트 통합 테스트(httpx AsyncClient), WS 구독·팬아웃 테스트, 불변식 #6·#10 | 03 |
-| P1-13 | Next.js 대시보드·AI 판단 로그 화면 | 03 §4, 디자인 캔버스 | `web/` (App Router, TS), 대시보드·거래·AI 로그 3화면 | 디자인 캔버스와 동일 구성, WS 실시간 갱신, Lighthouse 접근성 90+ | 03 §4 |
+| P1-13 | Next.js 대시보드·거래·AI 판단 로그 화면 + 모바일 | 10 문서, `docs/design/*.dc.html` | `web/` (App Router, TS), 3화면 + 모바일 대시보드, `globals.css` 토큰 | 아트보드와 동일 구성(픽셀 단위는 아니어도 레이아웃·색·문구 일치), WS 실시간 갱신, Lighthouse 접근성 90+ | 10, 03 §4 |
 | P1-14 | 운영: compose(paper) · 배포 스크립트 · 백업 · CI | 07 | `deploy/`, `.github/workflows/ci.yml`, `scripts/backup.sh` | VPS에서 `up -d` 후 `/health` OK, CI 그린 | 07 |
 
 ## 완료 기준 공통

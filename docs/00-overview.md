@@ -54,9 +54,11 @@
 | [07-operations](07-operations.md) | 배포, 키 관리, 스케줄, 모니터링, 알림, 런북 | 운영 |
 | [08-testing](08-testing.md) | 테스트 피라미드, 관문 검증, 페이퍼 A/B 설계 | 전체 |
 | [09-phase1-workplan](09-phase1-workplan.md) | 1단계 이슈 단위 작업 명세 (입력·출력·완료 기준) | Claude Code |
+| [10-ui-design](10-ui-design.md) | 화면 6개 핸드오프: 토큰·레이아웃·상태·API 매핑. 원본 아트보드는 `design/*.dc.html` | 프론트 |
+| [90-planning-brief](90-planning-brief.md) | 기획서 전문(마크다운 내보내기): 전략 선정 근거, API 비교, 규제·비용, 참고 자료 | 전체 |
 | [adr/](adr/) | 아키텍처 결정 기록 | 전체 |
 
-기획 배경(전략 선정 근거, API 비교, 규제·비용, 화면 설계)은 Claude Docs 기획서 "AI 퀀트 트레이딩 플랫폼 기획서"에 있다. 이 저장소의 문서는 그 기획서를 **구현 가능한 수준**으로 내린 것이다.
+기획 배경은 `90-planning-brief.md`(Claude Docs 기획서의 내보내기 사본, 원본이 우선), 화면 원본은 `design/`에 있다. 이 저장소의 00~10 문서는 그 기획서를 **구현 가능한 수준**으로 내린 것이다.
 
 ## 설계 원칙 (모든 문서에 공통)
 

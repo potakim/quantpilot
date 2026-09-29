@@ -8,6 +8,7 @@
 Petit 2026 재현: 1971~2026 CAGR 15.18%, Sharpe 0.83, MDD −21.7% (S&P 500 11.27% / −50.9%).
 2010년 이후 패시브 대비 연 −4.8%p — 방어 목적으로 이해할 것.
 """
+
 from __future__ import annotations
 
 from quantpilot.core.models import Market, Target
@@ -42,17 +43,27 @@ class DualMomentumGEM(Strategy):
         return float(close.iloc[-1] / close.iloc[-1 - n] - 1)
 
     def on_bar(self, ctx: Context) -> list[Target]:
-        us, intl, bond, cash = (self.params[k] for k in ("equity_us", "equity_intl", "bond", "cash"))
-        if any(s not in ctx.bars or len(ctx.bars[s]) < self.warmup_bars for s in (us, intl, bond, cash)):
+        us, intl, bond, cash = (
+            self.params[k] for k in ("equity_us", "equity_intl", "bond", "cash")
+        )
+        if any(
+            s not in ctx.bars or len(ctx.bars[s]) < self.warmup_bars for s in (us, intl, bond, cash)
+        ):
             return []
         lookbacks = self.params["lookbacks"]
         weights: dict[str, float] = {s: 0.0 for s in (us, intl, bond)}
         share = 1.0 / len(lookbacks)
         for m in lookbacks:
-            r_us, r_intl, r_cash = self._ret(ctx, us, m), self._ret(ctx, intl, m), self._ret(ctx, cash, m)
-            if r_us > r_cash:                       # 절대 모멘텀 통과 → 주식
+            r_us, r_intl, r_cash = (
+                self._ret(ctx, us, m),
+                self._ret(ctx, intl, m),
+                self._ret(ctx, cash, m),
+            )
+            if r_us > r_cash:  # 절대 모멘텀 통과 → 주식
                 pick = us if r_us >= r_intl else intl
-            else:                                   # 실패 → 채권
+            else:  # 실패 → 채권
                 pick = bond
             weights[pick] += share
-        return [Target(s, round(w, 6), reason=f"gem lookbacks={lookbacks}") for s, w in weights.items()]
+        return [
+            Target(s, round(w, 6), reason=f"gem lookbacks={lookbacks}") for s, w in weights.items()
+        ]

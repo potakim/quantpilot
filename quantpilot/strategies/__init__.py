@@ -1,4 +1,5 @@
 """전략 레지스트리. 새 전략은 Strategy를 상속하고 여기 등록하면 API·백테스터·페이퍼가 모두 인식한다."""
+
 from __future__ import annotations
 
 from quantpilot.strategies.base import Context, ParamSpec, Strategy
@@ -18,5 +19,14 @@ def create(name: str, **params) -> Strategy:
     return REGISTRY[name](**params)
 
 
-__all__ = ["Strategy", "Context", "ParamSpec", "REGISTRY", "create",
-           "VolBreakout", "DualMomentumGEM", "GTAA", "OpeningRangeBreakout"]
+__all__ = [
+    "GTAA",
+    "REGISTRY",
+    "Context",
+    "DualMomentumGEM",
+    "OpeningRangeBreakout",
+    "ParamSpec",
+    "Strategy",
+    "VolBreakout",
+    "create",
+]

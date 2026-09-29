@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     initial_cash_usd: float = 10_000
     paper: bool = True  # False로 바꾸는 것은 관문 통과 후 별도 플로우에서만
 
+    # 저장소 (02 문서). 비어 있으면 data_dir 아래 SQLite 파일을 쓴다.
+    database_url: str = ""
+
     # 판단 계층
     judge_provider: str = "stub"  # stub | typesafe | laya
     llm_providers: list[str] = Field(default_factory=lambda: ["stub", "stub"])
@@ -43,6 +46,10 @@ class Settings(BaseSettings):
     @property
     def cache_dir(self) -> Path:
         return self.data_dir / "cache"
+
+    @property
+    def db_url(self) -> str:
+        return self.database_url or f"sqlite+aiosqlite:///{self.data_dir / 'quantpilot.db'}"
 
     @property
     def attempts_file(self) -> Path:

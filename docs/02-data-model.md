@@ -81,7 +81,7 @@ create table signals (                       -- 전략이 낸 후보 Target (진
   outcome     text not null,                 -- pending | judged_hold | risk_rejected | ordered | filled | expired
   outcome_reason text
 );
-select create_hypertable('signals', 'ts');
+create index on signals (ts desc);            -- 일반 테이블 (ADR 0008)
 
 create table judgments (                     -- 판단 모델 1회 호출
   id            bigserial primary key,
@@ -148,7 +148,7 @@ create table fills (                         -- 원장
   reason        text,
   paper         boolean not null
 );
-select create_hypertable('fills', 'ts');
+create index on fills (ts desc);              -- 일반 테이블 (ADR 0008)
 
 create table positions (                     -- 현재 상태 스냅샷 (재시작 복원용)
   market text not null, symbol text not null, strategy text not null,

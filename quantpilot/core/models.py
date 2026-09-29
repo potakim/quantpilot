@@ -27,6 +27,7 @@ class OrderType(str, Enum):
 class OrderStatus(str, Enum):
     PENDING = "pending"
     FILLED = "filled"
+    PARTIAL = "partial"
     REJECTED = "rejected"
     CANCELLED = "cancelled"
 
@@ -62,6 +63,14 @@ class Order:
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     status: OrderStatus = OrderStatus.PENDING
     reject_reason: str = ""
+    # 1단계 (02 §1.4 orders 대응)
+    market: Market | None = None
+    signal_id: int | None = None
+    broker_order_id: str | None = None
+    ts: datetime | None = None
+    risk_adjustments: list[str] = field(default_factory=list)
+    size_multiplier: float | None = None
+    paper: bool = True
 
 
 @dataclass
@@ -76,6 +85,9 @@ class Fill:
     ts: datetime
     strategy: str = ""
     reason: str = ""
+    # 1단계 (02 §1.4 fills 대응)
+    market: Market | None = None
+    paper: bool = True
 
     @property
     def gross(self) -> float:
@@ -93,6 +105,9 @@ class Position:
     avg_price: float = 0.0
     opened_at: datetime | None = None
     strategy: str = ""
+    # 1단계 (02 §1.4 positions 대응)
+    market: Market | None = None
+    stop: float | None = None
 
     @property
     def is_open(self) -> bool:

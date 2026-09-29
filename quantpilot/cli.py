@@ -1,4 +1,5 @@
 """명령줄: qp backtest / qp fetch / qp judge / qp serve"""
+
 from __future__ import annotations
 
 import argparse
@@ -30,26 +31,44 @@ def cmd_backtest(a: argparse.Namespace) -> int:
     strat.symbols = symbols
     tf = "5m" if strat.timeframe == "5m" else "1d"
     if a.source == "synthetic":
-        data = ({s: synthetic.intraday_5m(synthetic.seed_of(s) % 997, days=60) for s in symbols} if tf == "5m"
-                else synthetic.universe(symbols, periods=2000, start="2017-01-01"))
+        data = (
+            {s: synthetic.intraday_5m(synthetic.seed_of(s) % 997, days=60) for s in symbols}
+            if tf == "5m"
+            else synthetic.universe(symbols, periods=2000, start="2017-01-01")
+        )
     else:
         cache = CandleCache(settings.cache_dir)
         kw = {"start": a.start} if a.start and a.source != "upbit" else {}
         data = {s: load(a.source, s, tf, cache=cache, refresh=a.refresh, **kw) for s in symbols}
-    cash = a.cash or (settings.initial_cash_usd if strat.market == Market.US else settings.initial_cash_krw)
+    cash = a.cash or (
+        settings.initial_cash_usd if strat.market == Market.US else settings.initial_cash_krw
+    )
     hold = a.holdout if a.holdout is not None else (0 if tf == "5m" else settings.holdout_months)
-    bt = Backtester(preset(strat.market), cash, holdout_months=hold, unlock_holdout=a.unlock_holdout,
-                    allow_short=bool(strat.params.get("allow_short", False)))
+    bt = Backtester(
+        preset(strat.market),
+        cash,
+        holdout_months=hold,
+        unlock_holdout=a.unlock_holdout,
+        allow_short=bool(strat.params.get("allow_short", False)),
+    )
     res = bt.run(strat, data, attempts=AttemptTracker(settings.attempts_file))
     s = res.summary()
-    print(f"\n{s['strategy']}  {s['start']} ~ {s['end']}  ({s['years']}y)  비용모델 {preset(strat.market)}")
-    print(f"  총수익 {s['total_return']:+.2%}  CAGR {s['cagr']:+.2%}  MDD {s['max_drawdown']:.2%}  "
-          f"Sharpe {s['sharpe']:.2f}  거래 {s['n_trades']}  승률 {s['win_rate']:.1%}  "
-          f"연회전율 {s['turnover_per_year']:.1f}x  비용합계 {s['total_costs']:,.0f}")
+    print(
+        f"\n{s['strategy']}  {s['start']} ~ {s['end']}  ({s['years']}y)  비용모델 {preset(strat.market)}"
+    )
+    print(
+        f"  총수익 {s['total_return']:+.2%}  CAGR {s['cagr']:+.2%}  MDD {s['max_drawdown']:.2%}  "
+        f"Sharpe {s['sharpe']:.2f}  거래 {s['n_trades']}  승률 {s['win_rate']:.1%}  "
+        f"연회전율 {s['turnover_per_year']:.1f}x  비용합계 {s['total_costs']:,.0f}"
+    )
     if s.get("holdout_cutoff"):
-        print(f"  홀드아웃: {s['holdout_cutoff']} 이후 {hold}개월 잠김 (--unlock-holdout 으로 1회 해제)")
+        print(
+            f"  홀드아웃: {s['holdout_cutoff']} 이후 {hold}개월 잠김 (--unlock-holdout 으로 1회 해제)"
+        )
     if s.get("attempts"):
-        print(f"  파라미터 시도: {s['attempts']['distinct_attempts']}/{s['attempts']['warn_after']}")
+        print(
+            f"  파라미터 시도: {s['attempts']['distinct_attempts']}/{s['attempts']['warn_after']}"
+        )
     for w in s["warnings"]:
         print("  !", w)
     if a.json:
@@ -62,22 +81,34 @@ def cmd_fetch(a: argparse.Namespace) -> int:
     for s in a.symbols:
         kw = {"count": a.count} if a.source == "upbit" else {"start": a.start}
         df = load(a.source, s, a.tf, cache=cache, refresh=True, **kw)
-        print(f"{a.source} {s} {a.tf}: {len(df)} bars  {df.index[0].date()} ~ {df.index[-1].date()}  "
-              f"→ {cache.path(a.source, s, a.tf)}")
+        print(
+            f"{a.source} {s} {a.tf}: {len(df)} bars  {df.index[0].date()} ~ {df.index[-1].date()}  "
+            f"→ {cache.path(a.source, s, a.tf)}"
+        )
     return 0
 
 
 def cmd_judge(a: argparse.Namespace) -> int:
-    st = State(market=a.market, symbol=a.symbol, strategy=a.strategy, signal=a.signal,
-               features={"ma_score": a.ma_score, "vol_pctl_20d": a.vol_pctl}, news_summary=a.news)
+    st = State(
+        market=a.market,
+        symbol=a.symbol,
+        strategy=a.strategy,
+        signal=a.signal,
+        features={"ma_score": a.ma_score, "vol_pctl_20d": a.vol_pctl},
+        news_summary=a.news,
+    )
     jr = StubJudge().judge(st)
     llms = [AlwaysApprove()] if a.no_gating else [StubLLM("claude-stub"), StubLLM("gemini-stub")]
     verdicts = [m.review(st, jr) for m in llms]
-    d = decide(jr, verdicts, hold_below=settings.gate_hold_below, full_above=settings.gate_full_above)
+    d = decide(
+        jr, verdicts, hold_below=settings.gate_hold_below, full_above=settings.gate_full_above
+    )
     print(st.render())
     print("---")
     print(json.dumps(jr.answers, ensure_ascii=False, indent=2))
-    print(f"confidence {jr.confidence}  gate {d.gate.value}  size x{d.size_multiplier}  blocks {d.blocks}")
+    print(
+        f"confidence {jr.confidence}  gate {d.gate.value}  size x{d.size_multiplier}  blocks {d.blocks}"
+    )
     for v in verdicts:
         print(f"  {v.model}: {'승인' if v.approve else '보류'} — {v.reason}")
     return 0
@@ -85,6 +116,7 @@ def cmd_judge(a: argparse.Namespace) -> int:
 
 def cmd_serve(a: argparse.Namespace) -> int:
     import uvicorn
+
     uvicorn.run("quantpilot.api.app:app", host=a.host, port=a.port, reload=a.reload)
     return 0
 
@@ -95,7 +127,9 @@ def main(argv: list[str] | None = None) -> int:
 
     b = sub.add_parser("backtest", help="백테스트 실행")
     b.add_argument("strategy", choices=sorted(REGISTRY))
-    b.add_argument("--source", default="synthetic", choices=["synthetic", "upbit", "yfinance", "fdr"])
+    b.add_argument(
+        "--source", default="synthetic", choices=["synthetic", "upbit", "yfinance", "fdr"]
+    )
     b.add_argument("--symbols", nargs="*")
     b.add_argument("--param", "-p", action="append", help="k=0.5 형식 (JSON 값)")
     b.add_argument("--start")

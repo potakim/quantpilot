@@ -4,10 +4,11 @@
 - 지정가: 매수는 시세 <= 지정가, 매도는 시세 >= 지정가일 때 체결. 아니면 대기 큐에 두고 다음 시세에서 재검사
 - 원장(ledger): 모든 체결을 순서대로 보관 → 사후 리뷰·A/B 리포트의 원천
 """
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Mapping
+from collections.abc import Mapping
+from datetime import UTC, datetime
 
 from quantpilot.backtest.costs import CostModel
 from quantpilot.core.models import Fill, Market, Order, OrderStatus, OrderType, Position, Side
@@ -15,8 +16,9 @@ from quantpilot.execution.broker import BrokerAdapter
 
 
 class PaperBroker(BrokerAdapter):
-    def __init__(self, market: Market, cost: CostModel, initial_cash: float, *,
-                 allow_short: bool = False):
+    def __init__(
+        self, market: Market, cost: CostModel, initial_cash: float, *, allow_short: bool = False
+    ):
         self.market = market
         self.cost = cost
         self._cash = float(initial_cash)
@@ -38,8 +40,9 @@ class PaperBroker(BrokerAdapter):
         for oid, o in list(self._pending.items()):
             if o.symbol != symbol or o.limit_price is None:
                 continue
-            crossed = (o.side == Side.BUY and price <= o.limit_price) or \
-                      (o.side == Side.SELL and price >= o.limit_price)
+            crossed = (o.side == Side.BUY and price <= o.limit_price) or (
+                o.side == Side.SELL and price >= o.limit_price
+            )
             if crossed:
                 del self._pending[oid]
                 fills.append(self._fill(o, o.limit_price, ts))
@@ -59,12 +62,16 @@ class PaperBroker(BrokerAdapter):
         pos = self._positions.get(order.symbol)
         held = pos.qty if pos else 0.0
         if order.side == Side.SELL and order.qty > held + 1e-12 and not self.allow_short:
-            order.status, order.reject_reason = OrderStatus.REJECTED, f"보유 {held:.6g} < 매도 {order.qty:.6g}"
+            order.status, order.reject_reason = (
+                OrderStatus.REJECTED,
+                f"보유 {held:.6g} < 매도 {order.qty:.6g}",
+            )
             return order
         if order.type == OrderType.LIMIT:
             assert order.limit_price is not None
-            crossed = (order.side == Side.BUY and px_ref <= order.limit_price) or \
-                      (order.side == Side.SELL and px_ref >= order.limit_price)
+            crossed = (order.side == Side.BUY and px_ref <= order.limit_price) or (
+                order.side == Side.SELL and px_ref >= order.limit_price
+            )
             if not crossed:
                 self._pending[order.id] = order
                 return order
@@ -75,23 +82,38 @@ class PaperBroker(BrokerAdapter):
         gross = order.qty * px
         fee, tax = self.cost.fee(gross), self.cost.tax(gross, order.side)
         if order.side == Side.BUY and gross + fee > self._cash + 1e-9:
-            order.status, order.reject_reason = OrderStatus.REJECTED, f"현금 부족 {self._cash:.0f} < {gross + fee:.0f}"
+            order.status, order.reject_reason = (
+                OrderStatus.REJECTED,
+                f"현금 부족 {self._cash:.0f} < {gross + fee:.0f}",
+            )
             return order
-        pos = self._positions.setdefault(order.symbol, Position(order.symbol, strategy=order.strategy))
+        pos = self._positions.setdefault(
+            order.symbol, Position(order.symbol, strategy=order.strategy)
+        )
         if order.side == Side.BUY:
             self._cash -= gross + fee
             nq = pos.qty + order.qty
             pos.avg_price = (pos.avg_price * pos.qty + px * order.qty) / nq
             pos.qty = nq
-            pos.opened_at = pos.opened_at or (ts or datetime.now(timezone.utc))
+            pos.opened_at = pos.opened_at or (ts or datetime.now(UTC))
         else:
             self._cash += gross - fee - tax
             pos.qty -= order.qty
             if not pos.is_open:
                 pos.qty, pos.avg_price, pos.opened_at = 0.0, 0.0, None
         order.status = OrderStatus.FILLED
-        f = Fill(order.id, order.symbol, order.side, order.qty, px, fee, tax,
-                 ts or datetime.now(timezone.utc), order.strategy, order.reason)
+        f = Fill(
+            order.id,
+            order.symbol,
+            order.side,
+            order.qty,
+            px,
+            fee,
+            tax,
+            ts or datetime.now(UTC),
+            order.strategy,
+            order.reason,
+        )
         self.ledger.append(f)
         return f
 

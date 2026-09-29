@@ -6,11 +6,12 @@
 - 홀드아웃: 마지막 holdout_months 개월은 기본적으로 잘라낸다. unlock_holdout=True는 실전 전환 직전 1회용.
 - 실전과 같은 전략 코드를 쓴다. 전략에 '백테스트 모드' 분기가 없다.
 """
+
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Mapping
 
 import numpy as np
 import pandas as pd
@@ -37,21 +38,36 @@ class BacktestResult:
     attempts: dict | None = None
 
     def summary(self) -> dict:
-        d = {"strategy": self.strategy, "params": self.params, **self.metrics.to_dict(),
-             "holdout_cutoff": str(self.holdout_cutoff.date()) if self.holdout_cutoff is not None else None,
-             "warnings": self.warnings}
+        d = {
+            "strategy": self.strategy,
+            "params": self.params,
+            **self.metrics.to_dict(),
+            "holdout_cutoff": str(self.holdout_cutoff.date())
+            if self.holdout_cutoff is not None
+            else None,
+            "warnings": self.warnings,
+        }
         if self.attempts:
             d["attempts"] = self.attempts
         return d
 
 
 class Backtester:
-    def __init__(self, cost: CostModel, initial_cash: float = 10_000_000.0, *,
-                 holdout_months: int = 12, unlock_holdout: bool = False,
-                 allow_zero_cost: bool = False, allow_short: bool = False,
-                 min_trade_frac: float = 0.002):
+    def __init__(
+        self,
+        cost: CostModel,
+        initial_cash: float = 10_000_000.0,
+        *,
+        holdout_months: int = 12,
+        unlock_holdout: bool = False,
+        allow_zero_cost: bool = False,
+        allow_short: bool = False,
+        min_trade_frac: float = 0.002,
+    ):
         if cost == ZERO and not allow_zero_cost:
-            raise ValueError("비용 0 백테스트는 allow_zero_cost=True를 명시해야 합니다 (테스트 전용)")
+            raise ValueError(
+                "비용 0 백테스트는 allow_zero_cost=True를 명시해야 합니다 (테스트 전용)"
+            )
         self.cost = cost
         self.initial_cash = initial_cash
         self.holdout_months = holdout_months
@@ -60,7 +76,9 @@ class Backtester:
         self.min_trade_frac = min_trade_frac
 
     # ---------- 데이터 준비 ----------
-    def _prepare(self, data: Mapping[str, pd.DataFrame]) -> tuple[dict[str, pd.DataFrame], pd.Timestamp | None, set]:
+    def _prepare(
+        self, data: Mapping[str, pd.DataFrame]
+    ) -> tuple[dict[str, pd.DataFrame], pd.Timestamp | None, set]:
         out: dict[str, pd.DataFrame] = {}
         for sym, df in data.items():
             missing = [c for c in REQUIRED_COLS if c not in df.columns]
@@ -68,7 +86,7 @@ class Backtester:
                 raise ValueError(f"{sym}: 컬럼 누락 {missing}")
             df = df.sort_index()
             if not isinstance(df.index, pd.DatetimeIndex):
-                raise ValueError(f"{sym}: DatetimeIndex 필요")
+                raise ValueError(f"{sym}: DatetimeIndex 필요")  # noqa: TRY004 — 입력 검증 오류는 ValueError로 통일
             out[sym] = df[list(REQUIRED_COLS)].astype(float)
         end = max(df.index[-1] for df in out.values())
         full = pd.DatetimeIndex(sorted(set().union(*[set(df.index) for df in out.values()])))
@@ -78,12 +96,18 @@ class Backtester:
             cutoff = end - pd.DateOffset(months=self.holdout_months)
             out = {s: df[df.index <= cutoff] for s, df in out.items()}
             out = {s: df for s, df in out.items() if len(df) > 0}
-            month_last = {t for t in month_last if t <= cutoff}   # 컷으로 생긴 부분월은 월말이 아니다
+            month_last = {
+                t for t in month_last if t <= cutoff
+            }  # 컷으로 생긴 부분월은 월말이 아니다
         return out, cutoff, month_last
 
     @staticmethod
-    def _increases(t: Target, visible: Mapping[str, pd.DataFrame], positions: Mapping[str, Position],
-                   equity: float) -> bool:
+    def _increases(
+        t: Target,
+        visible: Mapping[str, pd.DataFrame],
+        positions: Mapping[str, Position],
+        equity: float,
+    ) -> bool:
         """이 Target이 현재 보유 가치보다 비중을 늘리는 주문인지 (체결 순서 정렬용)."""
         if t.weight == 0 or t.symbol not in visible:
             return False
@@ -92,8 +116,9 @@ class Backtester:
         return t.weight * equity > held
 
     # ---------- 실행 ----------
-    def run(self, strategy: Strategy, data: Mapping[str, pd.DataFrame],
-            attempts=None) -> BacktestResult:
+    def run(
+        self, strategy: Strategy, data: Mapping[str, pd.DataFrame], attempts=None
+    ) -> BacktestResult:
         bars, cutoff, month_last = self._prepare(data)
         if not bars:
             raise ValueError("홀드아웃을 제외하면 데이터가 없습니다")
@@ -124,12 +149,17 @@ class Backtester:
             if not visible:
                 continue
 
-            equity = cash + sum(p.qty * last_price.get(s, p.avg_price) for s, p in positions.items())
+            equity = cash + sum(
+                p.qty * last_price.get(s, p.avg_price) for s, p in positions.items()
+            )
             targets: list[Target] = []
-            ready = all(len(v) >= strategy.warmup_bars for s, v in visible.items() if s in strategy.symbols) \
-                and any(s in visible for s in strategy.symbols)
+            ready = all(
+                len(v) >= strategy.warmup_bars for s, v in visible.items() if s in strategy.symbols
+            ) and any(s in visible for s in strategy.symbols)
             if ready and (not monthly or ts in month_last):
-                ctx = Context(ts=ts, bars=visible, positions=positions, equity=equity, params=strategy.params)
+                ctx = Context(
+                    ts=ts, bars=visible, positions=positions, equity=equity, params=strategy.params
+                )
                 targets = strategy.on_bar(ctx) or []
 
             # 청산 우선: 비중을 줄이는 주문을 먼저 체결해야 그 현금으로 늘리는 주문을 낼 수 있다.
@@ -139,11 +169,17 @@ class Backtester:
 
             for t in targets:
                 if t.symbol not in visible or visible[t.symbol].index[-1] != ts:
-                    continue                                   # 이 봉에 데이터 없는 심볼
+                    continue  # 이 봉에 데이터 없는 심볼
                 bar = visible[t.symbol].iloc[-1]
-                ref = float(bar["close"]) if t.price is None else float(np.clip(t.price, bar["low"], bar["high"]))
+                ref = (
+                    float(bar["close"])
+                    if t.price is None
+                    else float(np.clip(t.price, bar["low"], bar["high"]))
+                )
                 if t.price is not None and not (bar["low"] <= t.price <= bar["high"]):
-                    warnings.append(f"{ts.date()} {t.symbol}: 지정가 {t.price:.4g} 봉 범위 밖 → 클립")
+                    warnings.append(
+                        f"{ts.date()} {t.symbol}: 지정가 {t.price:.4g} 봉 범위 밖 → 클립"
+                    )
                 if t.weight < 0 and not self.allow_short:
                     continue
                 pos = positions.get(t.symbol) or Position(t.symbol, strategy=strategy.name)
@@ -158,7 +194,9 @@ class Backtester:
                 px = self.cost.fill_price(ref, side)
                 qty = abs(delta_value) / px
                 if side == Side.BUY and qty * px * (1 + self.cost.fee_rate) > cash + 1e-9:
-                    qty = max(0.0, cash / (px * (1 + self.cost.fee_rate)))   # 현금 한도 (수수료 포함)
+                    qty = max(
+                        0.0, cash / (px * (1 + self.cost.fee_rate))
+                    )  # 현금 한도 (수수료 포함)
                 if qty <= 0:
                     continue
                 gross = qty * px
@@ -169,7 +207,9 @@ class Backtester:
                 if side == Side.BUY:
                     cash -= gross + fee
                     new_qty = pos.qty + qty
-                    pos.avg_price = (pos.avg_price * pos.qty + px * qty) / new_qty if new_qty else 0.0
+                    pos.avg_price = (
+                        (pos.avg_price * pos.qty + px * qty) / new_qty if new_qty else 0.0
+                    )
                     pos.qty = new_qty
                     pos.opened_at = pos.opened_at or ts
                     cost_basis[t.symbol] = cost_basis.get(t.symbol, 0.0) + gross + fee
@@ -186,15 +226,34 @@ class Backtester:
                         pos.qty, pos.avg_price, pos.opened_at = 0.0, 0.0, None
                         cost_basis.pop(t.symbol, None)
                 positions[t.symbol] = pos
-                fills.append(Fill(order_id="bt", symbol=t.symbol, side=side, qty=qty, price=px,
-                                  fee=fee, tax=tax, ts=ts.to_pydatetime(), strategy=strategy.name,
-                                  reason=t.reason))
+                fills.append(
+                    Fill(
+                        order_id="bt",
+                        symbol=t.symbol,
+                        side=side,
+                        qty=qty,
+                        price=px,
+                        fee=fee,
+                        tax=tax,
+                        ts=ts.to_pydatetime(),
+                        strategy=strategy.name,
+                        reason=t.reason,
+                    )
+                )
 
-            equity_curve[ts] = cash + sum(p.qty * last_price.get(s, p.avg_price) for s, p in positions.items())
+            equity_curve[ts] = cash + sum(
+                p.qty * last_price.get(s, p.avg_price) for s, p in positions.items()
+            )
 
         eq = pd.Series(equity_curve).sort_index()
         m = M.compute(eq, trade_returns, total_costs, turnover, initial_equity=self.initial_cash)
-        att = attempts.record(strategy.name, strategy.params, strategy.symbols) if attempts else None
+        att = (
+            attempts.record(strategy.name, strategy.params, strategy.symbols) if attempts else None
+        )
         if att and att["overfit_warning"]:
-            warnings.append(f"과최적화 경고: 서로 다른 파라미터 {att['distinct_attempts']}회 시도 (> {att['warn_after']})")
-        return BacktestResult(strategy.name, dict(strategy.params), m, eq, fills, cutoff, warnings, att)
+            warnings.append(
+                f"과최적화 경고: 서로 다른 파라미터 {att['distinct_attempts']}회 시도 (> {att['warn_after']})"
+            )
+        return BacktestResult(
+            strategy.name, dict(strategy.params), m, eq, fills, cutoff, warnings, att
+        )

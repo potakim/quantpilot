@@ -147,7 +147,7 @@ APScheduler(AsyncIOScheduler), 잡은 DB에 영속(`SQLAlchemyJobStore`).
 
 ## 9. db
 
-`models.py`(SQLAlchemy), `mappers.py`(dataclass ↔ ORM), `repo.py`(`Ledger`, `SignalRepo`, `JudgmentRepo`, `PositionRepo`, `ConfigRepo`), `migrations/`(alembic). 코어는 `repo` 인터페이스(Protocol)만 알고 구현은 주입.
+`models.py`(SQLAlchemy), `mappers.py`(dataclass ↔ ORM), `repo.py`(`SqlLedger`, `SqlSignalRepo`, `SqlJudgmentRepo`, `SqlPositionRepo`, `SqlConfigRepo`), `migrations/`(alembic). 코어는 `core/repos.py`의 Protocol(`Ledger`, `SignalRepo`, `JudgmentRepo`, `PositionRepo`, `ConfigRepo`)만 알고 구현은 주입 (ADR 0008).
 
 ## 10. api
 

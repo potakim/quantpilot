@@ -34,7 +34,7 @@ class CostModel:
 PRESETS: dict[Market, CostModel] = {
     Market.UPBIT: CostModel(fee_rate=0.0005, slippage_rate=0.0005, sell_tax_rate=0.0),
     Market.KRX:   CostModel(fee_rate=0.00015, slippage_rate=0.0005, sell_tax_rate=0.0020),
-    Market.US:    CostModel(fee_rate=0.0010, slippage_rate=0.0003, sell_tax_rate=0.0),
+    Market.US:    CostModel(fee_rate=0.0010, slippage_rate=0.0001, sell_tax_rate=0.0),  # 1bp ≈ QQQ 5¢/주
 }
 
 ZERO = CostModel(0.0, 0.0, 0.0)   # 테스트 전용. 엔진은 allow_zero_cost=True 없이는 거부한다.

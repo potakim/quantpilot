@@ -60,7 +60,7 @@ class Backtester:
         self.min_trade_frac = min_trade_frac
 
     # ---------- 데이터 준비 ----------
-    def _prepare(self, data: Mapping[str, pd.DataFrame]) -> tuple[dict[str, pd.DataFrame], pd.Timestamp | None]:
+    def _prepare(self, data: Mapping[str, pd.DataFrame]) -> tuple[dict[str, pd.DataFrame], pd.Timestamp | None, set]:
         out: dict[str, pd.DataFrame] = {}
         for sym, df in data.items():
             missing = [c for c in REQUIRED_COLS if c not in df.columns]
@@ -71,25 +71,24 @@ class Backtester:
                 raise ValueError(f"{sym}: DatetimeIndex 필요")
             out[sym] = df[list(REQUIRED_COLS)].astype(float)
         end = max(df.index[-1] for df in out.values())
+        full = pd.DatetimeIndex(sorted(set().union(*[set(df.index) for df in out.values()])))
+        month_last = set(pd.Series(full, index=full).groupby([full.year, full.month]).last())
         cutoff = None
         if self.holdout_months > 0 and not self.unlock_holdout:
             cutoff = end - pd.DateOffset(months=self.holdout_months)
             out = {s: df[df.index <= cutoff] for s, df in out.items()}
             out = {s: df for s, df in out.items() if len(df) > 0}
-        return out, cutoff
+            month_last = {t for t in month_last if t <= cutoff}   # 컷으로 생긴 부분월은 월말이 아니다
+        return out, cutoff, month_last
 
     # ---------- 실행 ----------
     def run(self, strategy: Strategy, data: Mapping[str, pd.DataFrame],
             attempts=None) -> BacktestResult:
-        bars, cutoff = self._prepare(data)
+        bars, cutoff, month_last = self._prepare(data)
         if not bars:
             raise ValueError("홀드아웃을 제외하면 데이터가 없습니다")
         timeline = sorted(set().union(*[set(df.index) for df in bars.values()]))
         monthly = strategy.timeframe == "1M"
-        month_last = set()
-        if monthly:
-            idx = pd.DatetimeIndex(timeline)
-            month_last = set(pd.Series(idx, index=idx).groupby([idx.year, idx.month]).last())
 
         cash = self.initial_cash
         positions: dict[str, Position] = {}

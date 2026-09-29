@@ -74,7 +74,7 @@ def backtest(req: BacktestRequest) -> dict:
     strat.symbols = symbols
     tf = "5m" if strat.timeframe == "5m" else "1d"
     if req.source == "synthetic":
-        data = ({s: synthetic.intraday_5m(abs(hash(s)) % 997, days=60) for s in symbols} if tf == "5m"
+        data = ({s: synthetic.intraday_5m(synthetic.seed_of(s) % 997, days=60) for s in symbols} if tf == "5m"
                 else synthetic.universe(symbols, periods=2000, start=req.start or "2017-01-01"))
     else:
         try:
@@ -85,7 +85,8 @@ def backtest(req: BacktestRequest) -> dict:
             raise HTTPException(502, f"data load failed: {e}")
     cash = req.initial_cash or (settings.initial_cash_usd if strat.market == Market.US else settings.initial_cash_krw)
     hold = req.holdout_months if req.holdout_months is not None else (0 if tf == "5m" else settings.holdout_months)
-    bt = Backtester(preset(strat.market), cash, holdout_months=hold, unlock_holdout=req.unlock_holdout)
+    bt = Backtester(preset(strat.market), cash, holdout_months=hold, unlock_holdout=req.unlock_holdout,
+                    allow_short=bool(strat.params.get("allow_short", False)))
     res = bt.run(strat, data, attempts=AttemptTracker(settings.attempts_file))
     eq = res.equity
     step = max(1, len(eq) // 500)

@@ -2,7 +2,7 @@
 
 사용: python scripts/verify_g1.py   (먼저 qp fetch 로 데이터를 받아둘 것)
 """
-from quantpilot.backtest import Backtester, preset
+from quantpilot.backtest import AttemptTracker, Backtester, preset
 from quantpilot.config import settings
 from quantpilot.data import CandleCache, load
 from quantpilot.strategies import create
@@ -23,8 +23,11 @@ for name, ref in PUBLIC.items():
     except Exception as e:
         print(f"{name}: 데이터 없음 ({e}) → qp fetch 먼저")
         continue
+    tracker = AttemptTracker(settings.attempts_file)
     res = Backtester(preset(strat.market), holdout_months=12).run(strat, data)
     m = res.metrics
-    ok = abs(m.cagr - ref["cagr"]) <= 0.2 * abs(ref["cagr"]) and abs(m.max_drawdown - ref["mdd"]) <= 0.2 * abs(ref["mdd"])
+    attempts = tracker.count(name)
+    ok = abs(m.cagr - ref["cagr"]) <= 0.2 * abs(ref["cagr"]) and abs(m.max_drawdown - ref["mdd"]) <= 0.2 * abs(ref["mdd"]) \
+        and attempts <= 7
     print(f"{name}: CAGR {m.cagr:+.2%} (공개 {ref['cagr']:+.2%})  MDD {m.max_drawdown:.2%} (공개 {ref['mdd']:.2%})  "
-          f"{m.start}~{m.end}  → {'G1 PASS' if ok else 'G1 미달 (기간·유니버스 차이 검토)'}\n   {ref['note']}")
+          f"{m.start}~{m.end}  시도 {attempts}/7  → {'G1 PASS' if ok else 'G1 미달 (기간·유니버스 차이 또는 시도 초과)'}\n   {ref['note']}")

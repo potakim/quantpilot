@@ -111,6 +111,7 @@ class JudgeResult:
     confidence: float        # 0~1
     latency_ms: float = 0.0
     model: str = ""
+    cost_usd: float = 0.0
     raw: Optional[dict] = None
 
 

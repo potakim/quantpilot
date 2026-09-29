@@ -1,0 +1,158 @@
+# 04 · 모듈 설계
+
+패키지 의존 방향 (화살표 방향으로만 import 가능):
+
+```
+api ──▶ db ──▶ core
+engine ──▶ strategies, features, judgment, execution, data, db ──▶ core
+scheduler ──▶ engine, execution, data, db
+backtest ──▶ strategies, core           (CostModel은 backtest/costs.py에 있고 execution/paper.py가 이를 import한다 — 1단계에서 core/costs.py로 이동)
+judgment ──✕──▶ execution        (금지. 테스트로 강제)
+strategies ──✕──▶ 그 외 전부      (core만)
+```
+
+## 1. core
+
+`models.py`(0단계 완료) + 1단계 추가:
+
+- `clock.py` — `MarketClock(market)`: `now()`, `is_open(ts)`, `next_open()`, `next_close()`, `session_bounds(date)`, `to_local(ts_utc)`, `to_utc(ts_local)`. 캘린더는 `exchange_calendars`(XKRX, XNYS) + 업비트 24시간. 서머타임은 캘린더가 처리.
+- `events.py` — 엔진 내부 이벤트 dataclass: `TradeEvent`, `BarClosed`, `SignalEvent`, `JudgmentEvent`, `OrderEvent`, `FillEvent`, `RiskEvent`.
+- `errors.py` — `BrokerError(retryable: bool)`, `RateLimited(retry_after)`, `JudgeTimeout`, `DataStale`.
+
+## 2. strategies (0단계 완료)
+
+인터페이스는 `strategies/base.py` 그대로. 1단계 추가 규칙:
+
+- `Strategy.horizon`이 `intraday`인 전략은 `Target.stop`을 반드시 준다 (RiskManager 1% 룰 계산용). 테스트로 강제.
+- 월간 전략(`timeframe="1M"`)의 `on_bar`는 엔진이 **월 마지막 거래일 15:20(KRX) / 15:55 ET(미국)** 봉에서만 호출한다. 판단은 `MarketClock.is_last_session_of_month(ts)`.
+- `Strategy.describe()`에 `public_reference: {cagr, mdd, source}`를 추가해 화면과 G1 스크립트가 쓴다.
+
+## 3. features (1단계 신규)
+
+```python
+class FeatureBuilder:
+    def build(self, symbol: str, ctx: Context, target: Target, news: list[NewsItem]) -> State
+```
+
+- 숫자는 **등급·백분위**로 바꾼다: `vol_pctl_20d`(0~100), `ma_score`(0~1), `volume_ratio`(당일/20일 평균, 소수 1자리), `spread_bps`, `dist_from_high_20d_pct`, `rsi2`(정수).
+- 뉴스는 최근 24시간 중 위험 플래그 있는 것 우선, 최대 3건, 각 100자.
+- `events_24h`: 캘린더(FOMC·CPI·실적·상장폐지 심사·하드포크)에서 24시간 내 항목. 캘린더는 `data/events.py`가 수동 YAML + DART 공시로 채운다.
+- 출력 `State.render()`는 400토큰 이내. 초과하면 뉴스부터 자른다. 테스트: `len(tokens) <= 400`.
+
+## 4. judgment
+
+0단계 인터페이스 유지. 1단계 구현체:
+
+| 파일 | 클래스 | 비고 |
+| --- | --- | --- |
+| `typesafe.py` | `TypeSafeJudge(api_key, model="jev-latest", timeout=3.0)` | `POST https://api.typesafe.ai/v1/systemone`. 원자 질문 6개를 한 요청에. 응답의 `confidence`는 질문별 최솟값을 `JudgeResult.confidence`로 (보수적) |
+| `laya.py` | `LayaJudge(base_url)` | 자체 호스팅 HTTP. 같은 스키마 |
+| `anthropic.py` | `ClaudeReviewer(model="claude-sonnet-5")` | `review()` + `daily_review()` + `answer_question()` |
+| `google.py` | `GeminiReviewer(model="gemini-3.5-flash")`, `GeminiSummarizer(model="gemini-3.5-flash-lite")` | 리뷰 / 뉴스 요약 |
+| `pipeline.py` | `JudgmentPipeline(judge, reviewers, settings)` | `run(state) -> Decision` — 하드블록 → 게이트 → LLM 합의(병렬, 30초 타임아웃) → 로그 기록. `Decision`은 0단계 `decide()`와 동일 |
+| `calibration.py` | `brier(judgments)`, `ece(judgments, bins=10)`, `bucket_hit_rates()` | `realized_ret_24h`가 채워진 행만 |
+
+LLM 프롬프트 계약은 06 문서. 모든 프로바이더는 `cost_usd`를 계산해 돌려준다(토큰 × 단가표 `judgment/pricing.py`).
+
+## 5. execution
+
+### 5.1 BrokerAdapter 구현체 (1~2단계)
+
+| 파일 | 클래스 | 라이브러리 | 특이사항 |
+| --- | --- | --- | --- |
+| `paper.py` | `PaperBroker` | — | 0단계 완료. 1단계: 포지션·원장을 DB에 쓰는 `PersistentPaperBroker`로 확장 |
+| `upbit.py` | `UpbitBroker` | pyupbit 또는 직접 REST(JWT HS512) | 주문 12/s, 조회 30/s. `order-test`로 사전 검증. 체결 확인은 `/v1/order` 폴링 0.5s |
+| `kis.py` | `KISBroker(paper: bool)` | python-kis | 토큰 24h(`TokenManager`), 실전 20건/s·모의 2건/s, 체결통보 WS. 국내·해외 같은 클래스, 시장 파라미터 |
+| `alpaca.py` | `AlpacaPaperBroker` | alpaca-py | 페이퍼 전용. 200 req/min |
+
+공통 계약:
+
+- `submit()`은 **동기적으로 거래소 접수까지**만 보장하고 `Order(status=pending)`를 돌려줄 수 있다. 체결은 `OrderExecutor`가 확인한다.
+- 예외는 `BrokerError(retryable)`로 통일. HTTP 429 → `RateLimited`, 5xx·타임아웃 → retryable, 4xx(잔고 부족·잘못된 수량) → non-retryable.
+- `positions()`·`cash()`는 거래소 조회(캐시 2초). `Reconciler`가 DB 포지션과 대조한다.
+- 수량·가격은 거래소 호가 단위·최소 주문 금액에 맞게 어댑터가 반올림하고, 반올림 결과 0이면 `qty<=0`로 거부.
+
+### 5.2 OrderExecutor (1단계 신규)
+
+```python
+class OrderExecutor:
+    def __init__(self, broker, risk: RiskManager, ledger: Ledger, limiter: RateLimiter)
+    async def execute(self, order: Order, *, equity, price, positions, horizon, intraday_exposure) -> ExecResult
+```
+
+1. `risk.check()` → 거부면 `signals.outcome = risk_rejected` 기록 후 반환.
+2. `limiter.acquire(group)` (Redis 슬라이딩 윈도, 거래소별 한도의 80%).
+3. `broker.submit()` — retryable 오류는 지수 백오프 3회(0.5·1·2초). 3회 실패 → `risk.api_error()`.
+4. pending이면 체결 확인 루프(폴링 또는 WS 통보) 최대 30초. 시장가 미체결이면 취소 후 1회 재주문. 지정가는 전략의 `ttl`(기본 60초)까지 대기 후 취소.
+5. Fill 확정 → `ledger.record(fill, signal, judgment)` → `positions` 갱신 → `ch:fills` 발행.
+
+청산 주문(`signals.kind = exit`인 주문)은 1·2를 건너뛰지 않되(`risk.check`가 exit는 항상 허용), 재시도 횟수를 10회로 늘리고 실패 시 알림을 `critical`로 보낸다.
+
+### 5.3 RiskManager (0단계 완료)
+
+1단계 추가: `intraday_exposure`를 엔진이 계산해 넘긴다(horizon=intraday 전략들의 현재 포지션 가치 합). 월 서킷브레이커의 월 경계는 `RiskManager`가 `check()` 호출 시 UTC 월 기준으로 자동 롤한다(0단계). `scheduler.month_roll`은 롤 직후 `month_start_equity`를 DB `settings`에 저장해 재시작에도 유지하는 역할만 한다.
+
+### 5.4 Reconciler (1단계 신규)
+
+엔진 시작 시와 매 5분: 브로커 `positions()`·`cash()`와 DB `positions`·`equity`를 대조. 수량 차이 > 최소 주문 단위면 `risk_events(reconcile_mismatch)` + 할트. 사람이 화면에서 "브로커 기준으로 맞추기"를 눌러야 해제.
+
+## 6. data
+
+| 파일 | 내용 |
+| --- | --- |
+| `loader.py` | 0단계 완료 (REST 백필) |
+| `upbit_ws.py` | `UpbitStream(symbols)` — public WS `trade`·`orderbook`. 재접속 백오프, `TradeEvent` 발행 |
+| `kis_ws.py` | `KISStream(app_key, symbols)` — 체결가·호가·체결통보. approval_key 발급, 41건 제한 관리 |
+| `aggregator.py` | `CandleAggregator(tf)` — `on_trade()` → 봉 마감 시 `BarClosed`. 마감 규칙: 다음 봉 첫 체결 또는 마감+2초 |
+| `store.py` | `CandleStore(db)` — `upsert(bars)`, `load(symbol, tf, start, end)`, 캐시 |
+| `news.py` | `NewsCollector(feeds)` — RSS·DART 수집, 중복 제거(`raw_hash`), `GeminiSummarizer`로 요약·위험 플래그 |
+| `events.py` | 이벤트 캘린더 (YAML + 공시) |
+
+## 7. engine (1단계 신규)
+
+```python
+class TickRunner:
+    """시장 하나의 틱 루프. 01-architecture §3의 1~8단계."""
+    def __init__(self, market, strategies, feature_builder, pipeline, executor, risk, clock, bus)
+    async def on_bar_closed(self, ev: BarClosed) -> None
+    async def on_time_exit(self, strategy_name: str) -> None      # scheduler가 호출
+    async def on_stop_check(self, ev: TradeEvent) -> None          # 손절·트레일링 (봉 마감 전, 체결가마다)
+```
+
+- 시장별 `TickRunner` 1개, `asyncio.TaskGroup`으로 실행. 전략 간 순서는 등록 순, 같은 심볼에 두 전략이 반대 target을 내면 **청산이 먼저**.
+- `on_stop_check`는 체결가마다 돌지만 판단 모델·LLM을 호출하지 않는다. `Position.stop` 이탈 시 즉시 exit target.
+- 백테스터는 1단계에서 이 `TickRunner`를 `PaperBroker` + `StubJudge` + 가짜 clock으로 돌리도록 리팩터한다. 그래야 "같은 코드"가 문자 그대로 성립한다. 0단계 `Backtester.run`의 인라인 루프는 그때 제거.
+
+## 8. scheduler (1단계 신규)
+
+APScheduler(AsyncIOScheduler), 잡은 DB에 영속(`SQLAlchemyJobStore`).
+
+| 잡 | 시각(KST) | 동작 |
+| --- | --- | --- |
+| `upbit_daily_exit` | 09:00:00 | 변동성 돌파 보유분 시장가 청산 → 목표가 재계산 → `strategy.status` 발행 |
+| `krx_close_orders` | 15:20:00 (거래일) | GTAA·(월말, 2단계)GEM-KRX 종가 단일가 주문 |
+| `us_orb_entry_window` | 22:35 (서머타임) / 23:35 (표준시) | ORB 진입 창 열기 |
+| `us_eod_exit` | 04:55 (서머타임) / 05:55 (표준시) | ORB 청산 |
+| `gem_rebalance` | 월 마지막 거래일 미국장 마감 5분 전 | GEM 리밸런싱 |
+| `kis_token_refresh` | 08:00 | 토큰 재발급, 실패 시 국내·미국 휴무 플래그 |
+| `upbit_prescreen` | 08:10 | 대상 코인별 LLM 2모델 news_risk 사전 심사 → 당일 제외 목록 (ADR 0004) |
+| `morning_brief` | 08:30 | Claude 아침 브리핑 알림: 일정·보유·리스크 |
+| `news_collect` | 매시 :05 | 뉴스 수집·요약 |
+| `fill_realized_24h` | 매시 :10 | `judgments.realized_ret_24h` 채우기 |
+| `daily_review` | 20:30 | Claude 사후 리뷰 → `daily_reviews`, 알림 |
+| `equity_snapshot` | 매분 | `equity_snapshots` |
+| `reconcile` | 5분 | Reconciler |
+| `month_roll` | 매월 1일 09:00 (UTC 00:00) | `month_start_equity` DB 저장 (롤 자체는 RiskManager) |
+| `engine_heartbeat` | 30초 | 엔진 하트비트 확인, 90초 없으면 알림 + 시간 청산 백업 모드 |
+
+## 9. db
+
+`models.py`(SQLAlchemy), `mappers.py`(dataclass ↔ ORM), `repo.py`(`Ledger`, `SignalRepo`, `JudgmentRepo`, `PositionRepo`, `ConfigRepo`), `migrations/`(alembic). 코어는 `repo` 인터페이스(Protocol)만 알고 구현은 주입.
+
+## 10. api
+
+0단계 `app.py`를 `api/routes/{system,strategies,backtests,trading,judgments,reports}.py`로 분할. 상태는 전부 DB·Redis에서. 백테스트 실행은 `ThreadPoolExecutor(1)` + Redis 진행률. WS 허브는 Redis pub/sub 구독 → 클라이언트 팬아웃.
+
+## 11. notify (1단계 신규)
+
+`Notifier.send(level, title, body)` — 채널: 텔레그램 봇(기본), 이메일(선택). `critical`(청산 실패·할트·정합 불일치)은 5분 간격 재알림. 알림 본문에 금액은 넣되 키·주문번호는 넣지 않는다.

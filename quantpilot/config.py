@@ -22,9 +22,7 @@ class Settings(BaseSettings):
     gate_hold_below: float = 0.5
     gate_full_above: float = 0.9
 
-    # 리스크 (RiskRules 기본값과 같음. 더 느슨하게는 못 바꾼다 — RiskManager가 max()로 막는다)
-    max_loss_per_trade: float = 0.01
-    monthly_loss_limit: float = -0.05
+    # 리스크 규칙은 설정에 없다 — ADR 0003: execution/risk.py::RiskRules 코드 상수.
 
     # 백테스트
     holdout_months: int = 12

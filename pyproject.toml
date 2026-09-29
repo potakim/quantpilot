@@ -57,6 +57,12 @@ packages = ["quantpilot"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "invariant: CLAUDE.md 불변식 테스트",
+    "integration: TickRunner 통합 테스트",
+    "network: 실제 외부 API 호출 (기본 제외)",
+]
+addopts = "-m 'not network'"
 
 [tool.ruff]
 line-length = 100

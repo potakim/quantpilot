@@ -4,6 +4,8 @@
 
 기획서: Claude Docs "AI 퀀트 트레이딩 플랫폼 기획서" · 화면: Claude Design "QuantPilot 화면 디자인"
 
+**설계 문서는 [`docs/00-overview.md`](docs/00-overview.md)부터.** 작업 지침은 [`CLAUDE.md`](CLAUDE.md), 1단계 작업 분해는 [`docs/09-phase1-workplan.md`](docs/09-phase1-workplan.md).
+
 ## 현재 상태: 0단계 (기반 구축)
 
 | 모듈 | 상태 | 위치 |

@@ -30,7 +30,7 @@ def cmd_backtest(a: argparse.Namespace) -> int:
     strat.symbols = symbols
     tf = "5m" if strat.timeframe == "5m" else "1d"
     if a.source == "synthetic":
-        data = ({s: synthetic.intraday_5m(abs(hash(s)) % 997, days=60) for s in symbols} if tf == "5m"
+        data = ({s: synthetic.intraday_5m(synthetic.seed_of(s) % 997, days=60) for s in symbols} if tf == "5m"
                 else synthetic.universe(symbols, periods=2000, start="2017-01-01"))
     else:
         cache = CandleCache(settings.cache_dir)
@@ -38,7 +38,8 @@ def cmd_backtest(a: argparse.Namespace) -> int:
         data = {s: load(a.source, s, tf, cache=cache, refresh=a.refresh, **kw) for s in symbols}
     cash = a.cash or (settings.initial_cash_usd if strat.market == Market.US else settings.initial_cash_krw)
     hold = a.holdout if a.holdout is not None else (0 if tf == "5m" else settings.holdout_months)
-    bt = Backtester(preset(strat.market), cash, holdout_months=hold, unlock_holdout=a.unlock_holdout)
+    bt = Backtester(preset(strat.market), cash, holdout_months=hold, unlock_holdout=a.unlock_holdout,
+                    allow_short=bool(strat.params.get("allow_short", False)))
     res = bt.run(strat, data, attempts=AttemptTracker(settings.attempts_file))
     s = res.summary()
     print(f"\n{s['strategy']}  {s['start']} ~ {s['end']}  ({s['years']}y)  비용모델 {preset(strat.market)}")

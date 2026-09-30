@@ -15,9 +15,9 @@ strategies ──✕──▶ 그 외 전부      (core만)
 
 `models.py`(0단계 완료) + 1단계 추가:
 
-- `clock.py` — `MarketClock(market)`: `now()`, `is_open(ts)`, `next_open()`, `next_close()`, `session_bounds(date)`, `to_local(ts_utc)`, `to_utc(ts_local)`. 캘린더는 `exchange_calendars`(XKRX, XNYS) + 업비트 24시간. 서머타임은 캘린더가 처리.
+- `clock.py` — `MarketClock(market)`: `now()`, `is_open(ts)`, `next_open()`, `next_close()`, `session_bounds(date)`, `to_local(ts_utc)`, `to_utc(ts_local)`. 휴장일·특수 세션은 `core/calendars.py` 내장 표(2020~2027, 범위 밖은 `CalendarOutOfRange`), 서머타임은 표준 라이브러리 `zoneinfo`. 업비트는 24시간이며 세션은 09:00 KST 경계. `exchange_calendars`는 `data/calendars.py` 선택 어댑터로만 쓴다 (ADR 0009).
 - `events.py` — 엔진 내부 이벤트 dataclass: `TradeEvent`, `BarClosed`, `SignalEvent`, `JudgmentEvent`, `OrderEvent`, `FillEvent`, `RiskEvent`.
-- `errors.py` — `BrokerError(retryable: bool)`, `RateLimited(retry_after)`, `JudgeTimeout`, `DataStale`.
+- `errors.py` — `BrokerError(retryable: bool)`, `RateLimited(retry_after)`, `JudgeTimeout`, `DataStale`, `CalendarOutOfRange`.
 
 ## 2. strategies (0단계 완료)
 

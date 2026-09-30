@@ -58,7 +58,7 @@ class SqlLedger:
         if symbol is not None:
             q = q.where(FillRow.symbol == symbol)
         if since is not None:
-            q = q.where(FillRow.ts >= to_db_ts(since))
+            q = q.where(FillRow.ts >= to_db_ts(since, market))
         async with self._sessions() as s:
             rows = (await s.scalars(q.order_by(FillRow.ts, FillRow.id))).all()
         return [row_to_fill(r) for r in rows]
@@ -81,7 +81,7 @@ class SqlSignalRepo:
     ) -> int:
         """신호를 pending으로 기록하고 id를 돌려준다."""
         row = SignalRow(
-            ts=to_db_ts(ts),
+            ts=to_db_ts(ts, market),
             strategy_id=strategy_id,
             market=Market(market).value,
             symbol=target.symbol,
@@ -129,7 +129,6 @@ class SqlJudgmentRepo:
         """판단 1회를 기록하고 id를 돌려준다."""
         row = JudgmentRow(
             signal_id=signal_id,
-            ts=to_db_ts(ts),
             provider=result.model,
             state=state,
             answers=result.answers,
@@ -140,6 +139,9 @@ class SqlJudgmentRepo:
             cost_usd=result.cost_usd,
         )
         async with self._sessions.begin() as s:
+            # judgments에는 market 컬럼이 없어 연결된 신호의 시장 현지시간으로 본다 (ADR 0009 §6)
+            signal = await s.get_one(SignalRow, signal_id)
+            row.ts = to_db_ts(ts, Market(signal.market))
             s.add(row)
             await s.flush()
             return row.id

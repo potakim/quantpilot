@@ -143,6 +143,8 @@ def build_upbit_paper(
 ) -> MarketEngine:
     """업비트 페이퍼 엔진 배선. 판단 파이프라인은 settings.judge_provider로 고른다 (stub이면 게이팅 OFF).
 
+    게이팅 OFF 섀도 원장(06 §6.2)을 항상 함께 둔다: 같은 신호·같은 시세·같은 규칙, 배수 1.0.
+
     sessions가 있으면 계좌를 DB에 저장하는 PersistentPaperBroker + OrderExecutor(원장 기록)를 쓰고,
     scheduler와 settings 우편함(SettingsEngineLink)으로 연결한다. 시작 전에 `restore()`를 불러야 한다.
     hub가 있으면 이벤트를 HubBus로 발행(sessions가 있으면 DB 기록 포함)하고 수동 주문 큐를 소비한다.
@@ -165,28 +167,44 @@ def build_upbit_paper(
     strategies = [create(n) for n in strategy_names]
     risk = RiskManager()
     clock = MarketClock(market)
+    cost = preset(market)
     link = None
     if sessions is None:
-        executor = DirectExecutor(
-            PaperBroker(market, preset(market), settings.initial_cash_krw), risk
-        )
+        executor = DirectExecutor(PaperBroker(market, cost, settings.initial_cash_krw), risk)
+        # 게이팅 OFF 섀도: 같은 CostModel·같은 규칙의 별도 RiskManager (06 §6.2, ADR 0016)
+        shadow = DirectExecutor(PaperBroker(market, cost, settings.initial_cash_krw), RiskManager())
     else:
         from quantpilot.db.repo import SqlConfigRepo, SqlLedger, SqlPositionRepo, SqlSignalRepo
         from quantpilot.engine.link import SettingsEngineLink
         from quantpilot.execution.executor import OrderExecutor
-        from quantpilot.execution.persistent_paper import PersistentPaperBroker
+        from quantpilot.execution.persistent_paper import (
+            PersistentPaperBroker,
+            SettingsPositionRepo,
+        )
         from quantpilot.execution.ratelimit import NoLimiter
 
         config = SqlConfigRepo(sessions)
         broker = PersistentPaperBroker(
             market,
-            preset(market),
+            cost,
             settings.initial_cash_krw,
             positions=SqlPositionRepo(sessions),
             config=config,
         )
         executor = OrderExecutor(
             broker, risk, SqlLedger(sessions), NoLimiter(), signals=SqlSignalRepo(sessions)
+        )
+        shadow_broker = PersistentPaperBroker(
+            market,
+            cost,
+            settings.initial_cash_krw,
+            positions=SettingsPositionRepo(config, market),
+            config=config,
+            book="shadow",
+        )
+        # 섀도는 신호 outcome을 덮어쓰지 않는다(signals=None) — outcome은 ON 원장의 결과
+        shadow = OrderExecutor(
+            shadow_broker, RiskManager(), SqlLedger(sessions, shadow=True), NoLimiter()
         )
         link = SettingsEngineLink(config)
     bus: object = _LogBus()
@@ -204,7 +222,8 @@ def build_upbit_paper(
         risk,
         clock,
         bus,
-        cost=preset(market),
+        cost=cost,
+        shadow=shadow,
     )
     orders = None
     if hub is not None:
@@ -238,6 +257,8 @@ def main() -> None:
 
     async def _run() -> None:
         await engine.runner.executor.broker.restore()
+        if engine.runner.shadow is not None:
+            await engine.runner.shadow.broker.restore()
         await engine.run(stream)
 
     asyncio.run(_run())

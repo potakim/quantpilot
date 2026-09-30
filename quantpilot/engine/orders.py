@@ -85,7 +85,7 @@ class ManualOrderConsumer:
             price=price,
             positions=dict(ex.positions()),
             horizon=str(item.get("horizon") or "swing"),
-            intraday_exposure=runner._intraday_exposure(),
+            intraday_exposure=runner._intraday_exposure(ex),
         )
         if isinstance(res, Fill):
             await runner.bus.publish("fill", FillEvent(res))

@@ -131,7 +131,8 @@ create table orders (
   risk_adjustments text[] not null default '{}',
   size_multiplier double precision,          -- 게이팅 결과 0.5 / 1.0
   strategy      text not null,
-  paper         boolean not null
+  paper         boolean not null,
+  shadow        boolean not null default false -- 게이팅 OFF A/B 섀도 원장 (06 §6.2, ADR 0016)
 );
 
 create table fills (                         -- 원장
@@ -146,7 +147,8 @@ create table fills (                         -- 원장
   tax           numeric(20,8) not null default 0,
   strategy      text not null,
   reason        text,
-  paper         boolean not null
+  paper         boolean not null,
+  shadow        boolean not null default false -- 섀도 행은 SqlLedger(shadow=True)만 읽는다
 );
 create index on fills (ts desc);              -- 일반 테이블 (ADR 0008)
 

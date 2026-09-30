@@ -1,10 +1,15 @@
-"""명령줄: qp backtest / qp fetch / qp judge / qp serve"""
+"""명령줄: qp backtest / qp fetch / qp judge / qp report ab / qp serve"""
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+import pandas as pd
 
 from quantpilot.backtest import AttemptTracker, Backtester, preset
 from quantpilot.config import settings
@@ -114,6 +119,57 @@ def cmd_judge(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_report_ab(a: argparse.Namespace) -> int:
+    """qp report ab --weeks 4: DB의 판단·ON/섀도 원장·봉으로 G2 리포트를 찍는다."""
+    from quantpilot.db.session import make_sessions
+    from quantpilot.judgment.ab import render_markdown
+
+    sessions = make_sessions(a.db_url or settings.db_url)
+    report = asyncio.run(
+        build_ab_report(sessions, Market(a.market), weeks=a.weeks, now=datetime.now(UTC))
+    )
+    text = render_markdown(report)
+    if a.out:
+        with open(a.out, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    print(json.dumps(report, default=str, ensure_ascii=False) if a.json else text)
+    return 0
+
+
+async def build_ab_report(
+    sessions: Any, market: Market, *, weeks: int, now: datetime, initial_cash: float | None = None
+) -> dict[str, Any]:
+    """최근 weeks주 A/B 리포트 dict. 원장 곡선은 계좌 시작부터 재생하고 1시간 종가로 평가한다."""
+    from quantpilot.core.clock import to_local
+    from quantpilot.db.repo import SqlCandleRepo, SqlJudgmentRepo, SqlLedger
+    from quantpilot.judgment.ab import ab_report, book_stats
+
+    end = to_local(now, market)
+    start = end - timedelta(weeks=weeks)
+    cash = initial_cash
+    if cash is None:
+        cash = settings.initial_cash_usd if market == Market.US else settings.initial_cash_krw
+    judgments = await SqlJudgmentRepo(sessions).between(market, start, end)
+    on = await SqlLedger(sessions).fills(market)
+    off = await SqlLedger(sessions, shadow=True).fills(market)
+    first = min((f.ts for f in on + off), default=start)
+    candles = SqlCandleRepo(sessions)
+    prices = {}
+    for sym in sorted({f.symbol for f in on + off}):
+        bars = await candles.load(market, sym, "1m", min(first, start), end)
+        if bars:
+            s = pd.Series([b.close for b in bars], index=pd.DatetimeIndex([b.ts for b in bars]))
+            prices[sym] = s.resample("1h").last().dropna()
+    return ab_report(
+        judgments,
+        book_stats(on, prices, cash, start, end),
+        book_stats(off, prices, cash, start, end),
+        start=start,
+        end=end,
+        signals=len(judgments),
+    )
+
+
 def cmd_serve(a: argparse.Namespace) -> int:
     import uvicorn
 
@@ -158,6 +214,16 @@ def main(argv: list[str] | None = None) -> int:
     j.add_argument("--news", default="")
     j.add_argument("--no-gating", action="store_true")
     j.set_defaults(fn=cmd_judge)
+
+    r = sub.add_parser("report", help="리포트")
+    rs = r.add_subparsers(dest="report", required=True)
+    ab = rs.add_parser("ab", help="게이팅 ON/OFF A/B + 보정 지표 → 관문 G2 (08 §5)")
+    ab.add_argument("--weeks", type=int, default=4)
+    ab.add_argument("--market", default="upbit", choices=[m.value for m in Market])
+    ab.add_argument("--db-url", default=None, help="기본 settings.db_url")
+    ab.add_argument("--out", default=None, help="마크다운 파일로도 저장")
+    ab.add_argument("--json", action="store_true")
+    ab.set_defaults(fn=cmd_report_ab)
 
     s = sub.add_parser("serve", help="FastAPI 서버")
     s.add_argument("--host", default="127.0.0.1")

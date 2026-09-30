@@ -14,6 +14,10 @@
 청산 우선: 비중을 줄이는 target을 먼저 체결해야 그 현금으로 늘리는 target을 낼 수 있다. 여러 전략이 같은 심볼에
 반대 target을 내도 청산이 먼저다. 정렬은 안정적이라 같은 그룹 안에서는 등록 순·전략이 준 순서를 지킨다.
 on_time_exit·on_stop_check는 판단 모델을 거치지 않는다 (01 §3: 청산은 2·6·7만 탄다).
+
+섀도 원장(06 §6.2, ADR 0016): `shadow` executor를 주면 ON이 받은 전략 신호를 그대로 게이팅 없이(배수 1.0)
+섀도 계좌에도 낸다. 판단은 한 번만 부르고, 섀도는 자기 risk.check → submit·포지션·손절선을 따로 가진다.
+섀도의 체결·주문은 버스에 발행하지 않는다(화면·알림이 실제 페이퍼 원장과 섞이지 않게).
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 import numpy as np
@@ -54,6 +58,15 @@ class TickSnapshot:
 
 
 @dataclass
+class _Book:
+    """원장 하나: ON(실제 게이팅) 또는 섀도(게이팅 OFF)."""
+
+    executor: OrderExecutor
+    shadow: bool = False
+    stops: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass
 class _Candidate:
     strategy: Strategy
     target: Target
@@ -79,9 +92,12 @@ class TickRunner:
         history: BarHistory | None = None,
         allow_short: bool = False,
         min_trade_frac: float = 0.002,
+        shadow: OrderExecutor | None = None,
     ):
         if getattr(risk, "unrestricted", False) and not executor.is_paper:
             raise ValueError("규칙 미적용 리스크 게이트는 페이퍼 브로커와만 쓸 수 있다 (ADR 0010)")
+        if shadow is not None and (not shadow.is_paper or shadow is executor):
+            raise ValueError("섀도 원장은 별도의 페이퍼 executor여야 한다 (07 문서, ADR 0016)")
         names = [s.name for s in strategies]
         if len(set(names)) != len(names):
             raise ValueError(f"전략 이름 중복: {names}")
@@ -90,6 +106,7 @@ class TickRunner:
         self.feature_builder = feature_builder
         self.pipeline = pipeline
         self.executor = executor
+        self.shadow = shadow
         self.risk = risk
         self.clock = clock
         self.bus = bus
@@ -97,7 +114,9 @@ class TickRunner:
         self.history = history or BarHistory()
         self.allow_short = allow_short
         self.min_trade_frac = min_trade_frac
-        self._stops: dict[str, float] = {}
+        self._on = _Book(executor)
+        self._off = _Book(shadow, shadow=True) if shadow is not None else None
+        self.shadow_signals = 0  # 섀도에 넘긴 전략 신호 수 = ON이 발행한 전략 신호 수
         self.warnings: list[str] = []  # 백테스트 결과에 실린다
 
     # ---------- 이벤트 입구 ----------
@@ -118,9 +137,11 @@ class TickRunner:
         # 1. 봉 반영
         for ev in evs:
             self.history.append(ev)
-            self.executor.mark(ev.symbol, ev.close, ev.ts)
+            for b in self._books():
+                b.executor.mark(ev.symbol, ev.close, ev.ts)
         bars = self.history.view()
         equity = self.executor.equity()
+        equities = {id(b): b.executor.equity() for b in self._books()}
         await self.bus.publish("tick", TickSnapshot(self.market, ts, equity))
 
         # 2. 전략 평가
@@ -157,47 +178,58 @@ class TickRunner:
                 continue  # 이 봉에 데이터 없는 심볼
             bar = bars[t.symbol].iloc[-1]
             ref = self._ref_price(t, bar, ts)
-            await self._act(c, ref, equity, ts)
+            await self._act(c, ref, ts, [(b, equities[id(b)]) for b in self._books()])
 
     async def on_time_exit(self, strategy_name: str) -> None:
         """scheduler가 호출. 그 전략의 열린 포지션을 전부 시장가 청산한다 (판단 모델 없음)."""
         s = self._strategy(strategy_name)
         ts = self.clock.now()
-        equity = self.executor.equity()
-        for sym, p in list(self.executor.positions().items()):
-            if p.strategy != strategy_name or not p.is_open:
-                continue
+        held: dict[str, list[tuple[_Book, float]]] = {}
+        for b in self._books():
+            eq = b.executor.equity()
+            for sym, p in b.executor.positions().items():
+                if p.strategy == strategy_name and p.is_open:
+                    held.setdefault(sym, []).append((b, eq))
+        for sym, books in held.items():
             t = Target(sym, 0.0, reason="time_exit")
-            await self._act(
-                _Candidate(s, t, None, False), self.executor.last_price(sym), equity, ts
-            )
+            ref = books[0][0].executor.last_price(sym)
+            await self._act(_Candidate(s, t, None, False), ref, ts, books)
 
     async def on_stop_check(self, ev: TradeEvent) -> None:
         """체결가마다 호출. 진입 때 받은 stop을 이탈하면 즉시 청산한다 (판단 모델·LLM 없음)."""
-        self.executor.mark(ev.symbol, ev.price, ev.ts)
-        stop = self._stops.get(ev.symbol)
-        pos = self.executor.positions().get(ev.symbol)
-        if stop is None or pos is None or not pos.is_open:
-            return
-        breached = ev.price <= stop if pos.qty > 0 else ev.price >= stop
-        if not breached:
-            return
-        s = self._strategy(pos.strategy)
-        t = Target(ev.symbol, 0.0, reason=f"stop {stop:.6g} 이탈")
-        await self._act(_Candidate(s, t, None, False), ev.price, self.executor.equity(), ev.ts)
+        for b in self._books():
+            b.executor.mark(ev.symbol, ev.price, ev.ts)
+            stop = b.stops.get(ev.symbol)
+            pos = b.executor.positions().get(ev.symbol)
+            if stop is None or pos is None or not pos.is_open:
+                continue
+            breached = ev.price <= stop if pos.qty > 0 else ev.price >= stop
+            if not breached:
+                continue
+            s = self._strategy(pos.strategy)
+            t = Target(ev.symbol, 0.0, reason=f"stop {stop:.6g} 이탈")
+            c = _Candidate(s, t, None, False)
+            await self._act(c, ev.price, ev.ts, [(b, b.executor.equity())])
 
     # ---------- 4~8단계 ----------
-    async def _act(self, c: _Candidate, ref: float, equity: float, ts: datetime) -> None:
+    async def _act(
+        self, c: _Candidate, ref: float, ts: datetime, books: Sequence[tuple[_Book, float]]
+    ) -> None:
+        """신호 1건을 원장별로 처리한다. books는 (원장, 틱 시작 평가액) — 섀도만 있는 청산도 온다."""
         s, t = c.strategy, c.target
         if t.weight < 0 and not self.allow_short:
             return
+        on_book = any(b is self._on for b, _ in books)
         kind = "rebalance" if s.timeframe == "1M" else ("entry" if c.grows else "exit")
         signal = SignalEvent(self.market, s.name, t, kind, ts)
-        await self.bus.publish("signal", signal)
+        if on_book:
+            await self.bus.publish("signal", signal)
+            if c.ctx is not None and any(b is self._off for b, _ in books):
+                self.shadow_signals += 1  # 전략 신호만 센다 (손절·시간 청산은 원장별 규칙)
 
-        # 4~5. 판단 파이프라인 — 진입에만
+        # 4~5. 판단 파이프라인 — 진입에만. 섀도는 결과와 무관하게 배수 1.0 (게이팅 OFF)
         mult = 1.0
-        if c.grows:
+        if c.grows and on_book:
             state = self.feature_builder.build(
                 symbol=t.symbol, strategy=s.name, target=t, ctx=c.ctx
             )
@@ -206,12 +238,21 @@ class TickRunner:
                 je = replace(je, state=state)  # judgments.state 기록용 (P1-12 EventRecorder)
             await self.bus.publish("judgment", je)
             mult = je.size_multiplier
-            if mult <= 0:
-                return
+        for b, equity in books:
+            m = 1.0 if b.shadow else mult
+            if c.grows and m <= 0:
+                continue
+            await self._order(b, c, ref, equity, m, ts)
 
+    async def _order(
+        self, b: _Book, c: _Candidate, ref: float, equity: float, mult: float, ts: datetime
+    ) -> None:
+        """6~8단계: 사이징 → risk.check → submit → 발행(섀도는 발행 안 함)."""
+        s, t = c.strategy, c.target
+        ex = b.executor
         # 6. 사이징
-        pos = self.executor.positions().get(t.symbol)
-        sized = self._size(t, ref, equity, mult, pos)
+        pos = ex.positions().get(t.symbol)
+        sized = self._size(t, ref, equity, mult, pos, ex)
         if sized is None:
             return
         side, qty = sized
@@ -226,37 +267,50 @@ class TickRunner:
             market=self.market,
             ts=pd.Timestamp(ts).to_pydatetime(),
             size_multiplier=mult if c.grows else None,
-            paper=self.executor.is_paper,
+            paper=ex.is_paper,
         )
 
         # 7. risk.check → submit
-        res = await self.executor.execute(
+        res = await ex.execute(
             order,
             equity=equity,
             price=ref,
-            positions=dict(self.executor.positions()),
+            positions=dict(ex.positions()),
             horizon=s.horizon,
-            intraday_exposure=self._intraday_exposure(),
+            intraday_exposure=self._intraday_exposure(ex),
         )
 
         # 8. 발행
         if isinstance(res, Fill):
-            await self.bus.publish("fill", FillEvent(res))
-            now_pos = self.executor.positions().get(t.symbol)
+            if not b.shadow:
+                await self.bus.publish("fill", FillEvent(res))
+            now_pos = ex.positions().get(t.symbol)
             if now_pos is None or not now_pos.is_open:
-                self._stops.pop(t.symbol, None)
+                b.stops.pop(t.symbol, None)
             elif c.grows and t.stop is not None:
-                self._stops[t.symbol] = t.stop
+                b.stops[t.symbol] = t.stop
         else:
-            await self.bus.publish("order", OrderEvent(res, order.ts or ts))
+            if not b.shadow:
+                await self.bus.publish("order", OrderEvent(res, order.ts or ts))
             if res.reject_reason:
                 log.info(
                     "주문 거부",
-                    extra={"symbol": t.symbol, "strategy": s.name, "reason": res.reject_reason},
+                    extra={
+                        "symbol": t.symbol,
+                        "strategy": s.name,
+                        "reason": res.reject_reason,
+                        "shadow": b.shadow,
+                    },
                 )
 
     def _size(
-        self, t: Target, ref: float, equity: float, mult: float, pos: Position | None
+        self,
+        t: Target,
+        ref: float,
+        equity: float,
+        mult: float,
+        pos: Position | None,
+        ex: OrderExecutor,
     ) -> tuple[Side, float] | None:
         """목표 비중 → (방향, 수량). 거래할 게 없으면 None."""
         held = pos.qty if pos else 0.0
@@ -268,7 +322,7 @@ class TickRunner:
         side = Side.BUY if delta_value > 0 else Side.SELL
         px = self.cost.fill_price(ref, side)
         qty = abs(delta_value) / px
-        cash = self.executor.cash()
+        cash = ex.cash()
         if side == Side.BUY and qty * px * (1 + self.cost.fee_rate) > cash + 1e-9:
             qty = max(0.0, cash / (px * (1 + self.cost.fee_rate)))  # 현금 한도 (수수료 포함)
             # 부동소수 반올림으로 gross+fee가 현금을 1ulp 넘으면 브로커가 거부한다 → 들어갈 때까지 깎는다
@@ -311,14 +365,17 @@ class TickRunner:
         held = pos.qty * float(bars[t.symbol]["close"].iloc[-1]) if pos else 0.0
         return t.weight * equity > held
 
-    def _intraday_exposure(self) -> float:
+    def _intraday_exposure(self, ex: OrderExecutor) -> float:
         """horizon=intraday 전략들의 현재 포지션 가치 합 (RiskManager 단타 합산 상한용)."""
         intraday = {s.name for s in self.strategies if s.horizon == "intraday"}
         return sum(
-            p.qty * self.executor.last_price(sym)
-            for sym, p in self.executor.positions().items()
+            p.qty * ex.last_price(sym)
+            for sym, p in ex.positions().items()
             if p.strategy in intraday
         )
+
+    def _books(self) -> list[_Book]:
+        return [self._on] if self._off is None else [self._on, self._off]
 
     def _strategy(self, name: str) -> Strategy:
         for s in self.strategies:

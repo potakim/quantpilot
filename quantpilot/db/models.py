@@ -18,6 +18,7 @@ from sqlalchemy import (
     Numeric,
     Text,
     UniqueConstraint,
+    false,
     func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
@@ -178,6 +179,8 @@ class OrderRow(Base):
     size_multiplier: Mapped[float | None] = mapped_column(Float)
     strategy: Mapped[str] = mapped_column(Text)
     paper: Mapped[bool] = mapped_column(Boolean)
+    # 게이팅 OFF A/B 섀도 원장 (06 §6.2, ADR 0016)
+    shadow: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 class FillRow(Base):
@@ -197,6 +200,7 @@ class FillRow(Base):
     strategy: Mapped[str] = mapped_column(Text)
     reason: Mapped[str | None] = mapped_column(Text)
     paper: Mapped[bool] = mapped_column(Boolean)
+    shadow: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 class PositionRow(Base):

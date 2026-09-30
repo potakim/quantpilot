@@ -123,6 +123,12 @@ class PaperBroker(BrokerAdapter):
             o.status = OrderStatus.CANCELLED
         return o is not None
 
+    def order_status(self, order_id: str) -> Fill | Order | None:
+        """대기 큐에 있으면 Order, 원장에 체결이 있으면 Fill, 둘 다 없으면 None."""
+        if order_id in self._pending:
+            return self._pending[order_id]
+        return next((f for f in reversed(self.ledger) if f.order_id == order_id), None)
+
     def pending(self) -> list[Order]:
         return list(self._pending.values())
 

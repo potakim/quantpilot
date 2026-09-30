@@ -22,7 +22,7 @@
 | 목표가 | `open_t + (high_{t-1} − low_{t-1}) × K` |
 | 진입 | 1분봉 체결가가 목표가 이상 → 시장가 매수, 하루 1회. `Target(price=목표가)` |
 | 비중 | `min(max_weight, vol_w × ma_score) / n_symbols`, `vol_w = min(1, target_vol / 전일 변동폭%)`, `ma_score = 종가 > MA(3,5,10,20) 개수 / 4` (전일 종가 기준) |
-| 청산 | 전략이 매 봉 `Target(weight=0, price=open)`을 먼저 낸다(= 다음 날 09:00 시가). 실시간에서는 `scheduler.upbit_daily_exit`가 09:00 봉을 트리거한다. 손절: 진입가 × (1 − 2 × 전일 변동폭%) — `Target.stop`, 1단계 `on_stop_check`가 감시. **0단계 백테스터는 stop과 RiskManager를 적용하지 않는다**(P1-04에서 TickRunner로 통합) |
+| 청산 | 전략이 매 봉 `Target(weight=0, price=open)`을 먼저 낸다(= 다음 날 09:00 시가). 실시간에서는 `scheduler.upbit_daily_exit`가 09:00 봉을 트리거한다. 손절: 진입가 × (1 − 2 × 전일 변동폭%) — `Target.stop`, 1단계 `on_stop_check`가 감시. 백테스터는 TickRunner로 돌지만 **stop 감시(`on_stop_check`)는 하지 않고, RiskManager는 기본 미적용**(`apply_risk=True`로 적용, ADR 0010) |
 | 파라미터 | `k` 0.3~0.8 (기본 0.5), `target_vol` 0.2%~3% (기본 1%), `ma_windows`, `noise_k` bool, `max_weight` |
 | 판단 계층 | 진입 전 판단 모델 게이팅 적용. LLM 합의는 **미적용**(1분 단위 반응 필요) — 대신 08:10에 하루 1회 LLM 2모델이 대상 코인별 news_risk를 사전 심사해 위험 코인은 당일 제외 |
 | 공개 수치 | 강환국, BTC 2013.10~2018.3, 비용 0.1%: 0.5% 타겟 + 5일선 필터 연 17.4%·MDD 6.5% / 1% 타겟 무필터 연 30.5%·MDD 27.3% |
@@ -62,7 +62,7 @@ KRX 버전(`gem_krx`, 2단계): TIGER 미국S&P500 / KODEX 선진국MSCI / KODEX
 | 시장 · 봉 | 미국(QQQ), 5분봉. **페이퍼 전용**(Alpaca). 실전 전환은 G2 통과 후 별도 승인 |
 | 진입 | 첫 5분봉(09:30~35 ET) 종가 > 시가면 둘째 봉 시가 롱. 숏은 `allow_short=False` 기본(국내 증권사 불가). 켜면 백테스터·브로커도 `allow_short=True`여야 하며, 숏 청산(BUY)의 리스크 예외 처리는 1단계 과제 |
 | 손절 · 목표 | 첫 봉 저가 / 10R. 15:55 ET 강제 청산 |
-| 수량 | 거래당 리스크 `risk_per_trade`(기본 1%) / R. 실시간에서는 RiskManager가 다시 1% 룰·단타 상한 적용(0단계 백테스터는 미적용) |
+| 수량 | 거래당 리스크 `risk_per_trade`(기본 1%) / R. 실시간에서는 RiskManager가 다시 1% 룰·단타 상한 적용(백테스터는 기본 미적용, `apply_risk=True`로 적용 — ADR 0010) |
 | 판단 계층 | 판단 모델 + LLM 합의(둘째 봉까지 5분 여유) |
 | 공개 수치 | Zarattini & Aziz 2023, QQQ 2016~2023: 연 31%, Sharpe 1.12, 승률 24%. Brusco 재현: 손익분기 슬리피지 ≈ 2.2¢/주, 2¢ 적용 시 CAGR 2.7% |
 | 관문 | G2에서 슬리피지 2¢ 포함 Sharpe > 0.5 못 넘으면 실전 후보에서 제외 |

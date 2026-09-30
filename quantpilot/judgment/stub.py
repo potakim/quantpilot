@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import time
 
+from quantpilot.core.events import JudgmentEvent, SignalEvent
 from quantpilot.core.models import JudgeResult
 from quantpilot.judgment.base import (
     DEFAULT_QUESTIONS,
@@ -17,6 +18,7 @@ from quantpilot.judgment.base import (
     LLMVerdict,
     Question,
     State,
+    decide,
 )
 
 
@@ -82,3 +84,23 @@ class AlwaysApprove(LLMProvider):
 
     def review(self, state: State, judge: JudgeResult) -> LLMVerdict:
         return LLMVerdict(self.name, True, "gating off (A/B baseline)")
+
+
+class StubPipeline:
+    """네트워크 없는 판단 파이프라인 (JudgmentPipeline Protocol). 백테스트·페이퍼 기본값.
+
+    진입 신호마다 판단 모델을 실제로 호출해 판단 이벤트를 남긴다. gating=False(기본)면 결과와 무관하게
+    size_multiplier=1.0 — 게이팅 A/B의 OFF 기준선이자 0단계 백테스트 수치 유지용 (ADR 0010).
+    gating=True면 hard_blocks·확신도 게이트(decide)를 그대로 적용한다. LLM 합의는 P1-08 몫.
+    """
+
+    def __init__(self, judge: JudgeProvider | None = None, *, gating: bool = False):
+        self.judge = judge or StubJudge()
+        self.gating = gating
+
+    async def evaluate(self, signal: SignalEvent, state: State) -> JudgmentEvent:
+        """판단 1회. 수량·가격은 정하지 않고 사이징 배수만 돌려준다."""
+        jr = self.judge.judge(state)
+        d = decide(jr, [])
+        mult = d.size_multiplier if self.gating else 1.0
+        return JudgmentEvent(signal.signal_id or 0, jr, d.gate, mult, signal.ts, tuple(d.blocks))

@@ -75,8 +75,8 @@ class PaperBroker(BrokerAdapter):
             if not crossed:
                 self._pending[order.id] = order
                 return order
-            return self._fill(order, order.limit_price)
-        return self._fill(order, self.cost.fill_price(px_ref, order.side))
+            return self._fill(order, order.limit_price, order.ts)
+        return self._fill(order, self.cost.fill_price(px_ref, order.side), order.ts)
 
     def _fill(self, order: Order, px: float, ts: datetime | None = None) -> Fill | Order:
         gross = order.qty * px

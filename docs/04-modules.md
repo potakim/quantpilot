@@ -115,13 +115,15 @@ class TickRunner:
     """시장 하나의 틱 루프. 01-architecture §3의 1~8단계."""
     def __init__(self, market, strategies, feature_builder, pipeline, executor, risk, clock, bus)
     async def on_bar_closed(self, ev: BarClosed) -> None
+    async def on_bars_closed(self, evs: Sequence[BarClosed]) -> None  # 같은 시각 봉 묶음 (ADR 0010)
     async def on_time_exit(self, strategy_name: str) -> None      # scheduler가 호출
     async def on_stop_check(self, ev: TradeEvent) -> None          # 손절·트레일링 (봉 마감 전, 체결가마다)
 ```
 
 - 시장별 `TickRunner` 1개, `asyncio.TaskGroup`으로 실행. 전략 간 순서는 등록 순, 같은 심볼에 두 전략이 반대 target을 내면 **청산이 먼저**.
-- `on_stop_check`는 체결가마다 돌지만 판단 모델·LLM을 호출하지 않는다. `Position.stop` 이탈 시 즉시 exit target.
-- 백테스터는 1단계에서 이 `TickRunner`를 `PaperBroker` + `StubJudge` + 가짜 clock으로 돌리도록 리팩터한다. 그래야 "같은 코드"가 문자 그대로 성립한다. 0단계 `Backtester.run`의 인라인 루프는 그때 제거.
+- `on_stop_check`는 체결가마다 돌지만 판단 모델·LLM을 호출하지 않는다. 진입 target의 `stop` 이탈 시 즉시 exit target.
+- `feature_builder`·`pipeline`·`executor`·`risk`·`clock`·`bus`는 `core/ports.py`의 Protocol이다. 봉 히스토리는 `engine/history.py::BarHistory`(백테스트는 미리 적재한 DataFrame의 커서, 실전은 `CandleStore.load`로 시드 후 봉마다 추가).
+- 백테스터는 이 `TickRunner`를 `PaperBroker` + `DirectExecutor` + `StubPipeline(StubJudge, gating=False)` + `ReplayClock` + `UnrestrictedRisk`(기본, `apply_risk=True`면 `RiskManager`)로 돌린다. 0단계 `Backtester.run`의 인라인 루프는 제거했다. 배선 결정과 0단계 대비 수치 차이는 ADR 0010.
 
 ## 8. scheduler (1단계 신규)
 

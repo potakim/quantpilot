@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     llm_providers: list[str] = Field(default_factory=lambda: ["stub", "stub"])
     gate_hold_below: float = 0.5
     gate_full_above: float = 0.9
+    ai_budget_usd_daily: float = 2.0  # 넘으면 LLM 합의 중단(= hold), 판단 모델은 계속 (06 §7)
 
     # 리스크 규칙은 설정에 없다 — ADR 0003: execution/risk.py::RiskRules 코드 상수.
 

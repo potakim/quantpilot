@@ -82,6 +82,7 @@ class LLMVerdict:
     reason: str
     latency_ms: float = 0.0
     cost_usd: float = 0.0
+    prompt_hash: str = ""  # llm_verdicts.prompt_hash (judgment/prompts)
 
 
 class LLMProvider(ABC):
@@ -89,6 +90,10 @@ class LLMProvider(ABC):
 
     @abstractmethod
     def review(self, state: State, judge: JudgeResult) -> LLMVerdict: ...
+
+    async def areview(self, state: State, judge: JudgeResult, rule: str = "") -> LLMVerdict:
+        """파이프라인용 비동기 리뷰. 네트워크 어댑터는 이벤트 루프를 막지 않도록 재정의한다."""
+        return self.review(state, judge)
 
 
 def gate(confidence: float, *, hold_below: float = 0.5, full_above: float = 0.9) -> Gate:

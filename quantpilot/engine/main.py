@@ -128,7 +128,7 @@ class MarketEngine:
 def build_upbit_paper(
     strategy_names: Sequence[str] = ("vol_breakout",), *, sessions: Sessions | None = None
 ) -> MarketEngine:
-    """업비트 페이퍼 엔진 배선. 판단 파이프라인은 P1-07/08 전까지 StubPipeline(게이팅 OFF).
+    """업비트 페이퍼 엔진 배선. 판단 파이프라인은 settings.judge_provider로 고른다 (stub이면 게이팅 OFF).
 
     sessions가 있으면 계좌를 DB에 저장하는 PersistentPaperBroker + OrderExecutor(원장 기록)를 쓰고,
     scheduler와 settings 우편함(SettingsEngineLink)으로 연결한다. 시작 전에 `restore()`를 불러야 한다.
@@ -140,7 +140,7 @@ def build_upbit_paper(
     from quantpilot.engine.replay import DirectExecutor, StubFeatureBuilder
     from quantpilot.execution.paper import PaperBroker
     from quantpilot.execution.risk import RiskManager
-    from quantpilot.judgment.stub import StubPipeline
+    from quantpilot.judgment.pipeline import build_pipeline
     from quantpilot.strategies import create
 
     if not settings.paper:
@@ -175,15 +175,16 @@ def build_upbit_paper(
             broker, risk, SqlLedger(sessions), NoLimiter(), signals=SqlSignalRepo(sessions)
         )
         link = SettingsEngineLink(config)
+    bus = _LogBus()
     runner = TickRunner(
         market,
         strategies,
         StubFeatureBuilder(market.value),
-        StubPipeline(),
+        build_pipeline(settings, bus=bus),
         executor,
         risk,
         clock,
-        _LogBus(),
+        bus,
         cost=preset(market),
     )
     return MarketEngine(runner, CandleAggregator("1m", market), clock, link=link)

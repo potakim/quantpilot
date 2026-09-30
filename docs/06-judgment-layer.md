@@ -25,7 +25,7 @@
 
 score 질문은 TypeSafe 형식상 `criteria` 단계(0..N-1)의 기댓값으로 돌아오므로, 코드가 `score / (N-1)`로 0~1로 바꿔 위 표의 범위를 맞춘다(v1은 5단계, ADR 0012).
 
-질문 문구는 `judgment/questions/v1.yaml`로 빼고 `prompt_hash`를 판단 로그에 남긴다(지금은 `JudgeResult.raw["prompt_hash"]`). 문구를 바꾸면 v2로 올리고 4주간 v1과 병행 기록해 Brier를 비교한 뒤 교체.
+질문 문구는 `judgment/questions/v1.yaml`로 빼고 `prompt_hash`를 판단 로그에 남긴다(`JudgeResult.raw["prompt_hash"]` → `judgments.state["prompt_hash"]`, ADR 0014). 문구를 바꾸면 v2로 올리고 4주간 v1과 병행 기록해 Brier를 비교한 뒤 교체.
 
 ## 3. state 스키마
 
@@ -69,7 +69,8 @@ size_multiplier = 0 | 0.5 | 1.0
 > 당신은 규칙 기반 퀀트 전략의 진입 후보를 검토하는 리스크 검토자다. 매매 신호를 만들지 말고, 아래 후보를 **막아야 할 이유**가 있는지만 판단하라. 근거는 제공된 state·뉴스 요약·판단 모델 답변에 한정한다. 출력은 JSON `{"approve": bool, "reason": "<80자 이내 한국어>"}` 뿐이다.
 
 - 입력: `state.render()`, `judge.answers`, `judge.confidence`, 전략 규칙 한 줄.
-- 출력 파싱 실패 → hold. 응답 길이 제한 200토큰. temperature 0.
+- 출력 파싱 실패·호출 오류·거부(refusal)·30초 타임아웃 → 그 모델 hold. 응답 길이 제한 200토큰. Gemini는 temperature 0. Claude Sonnet 5는 샘플링 인자를 받지 않아 JSON 스키마 구조화 출력 + thinking disabled로 고정한다 (ADR 0014).
+- 리뷰 프롬프트의 `prompt_hash`는 `llm_verdicts.prompt_hash`에, 판단 모델 질문 문구의 `prompt_hash`는 `judgments.state`의 `prompt_hash` 키에 남긴다 (ADR 0014).
 - 두 모델에 같은 프롬프트. 모델별 프롬프트 차이를 두지 않는다(합의의 의미).
 - 사후 리뷰(`daily_review`)는 별도 프롬프트: 오늘 원장·판단 로그를 받아 "무엇이 맞았고 무엇이 틀렸는지, 규칙 위반은 없었는지" 500자. 파라미터 변경 제안은 하되 **적용은 사람이**.
 - 질의응답(`/judgments/{id}/ask`): 해당 판단의 state·answers·verdicts·체결만 컨텍스트로. 다른 종목·계좌 정보는 넣지 않는다.

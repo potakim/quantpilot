@@ -160,6 +160,8 @@ APScheduler(AsyncIOScheduler), 잡은 DB에 영속(`SQLAlchemyJobStore`).
 | `month_roll` | 매월 1일 09:00 (UTC 00:00) | `month_start_equity` DB 저장 (롤 자체는 RiskManager) |
 | `engine_heartbeat` | 30초 | 엔진 하트비트 확인, 90초 없으면 알림 + 시간 청산 백업 모드 |
 
+engine ↔ scheduler는 P1-12 Redis 전까지 DB `settings` 우편함(`engine/link.py::SettingsEngineLink`)으로 하트비트와 시간 청산 명령을 주고받는다. 정상일 때는 엔진이 명령을 받아 `TickRunner.on_time_exit`를 부르고, 하트비트가 끊기면 scheduler가 DB 계좌로 만든 `TickRunner`의 `on_time_exit`를 직접 부른다(ADR 0013). 잡 표는 `scheduler/registry.py::JOBS`에 있다.
+
 ## 9. db
 
 `models.py`(SQLAlchemy), `mappers.py`(dataclass ↔ ORM), `repo.py`(`SqlCandleRepo`, `SqlLedger`, `SqlSignalRepo`, `SqlJudgmentRepo`, `SqlPositionRepo`, `SqlConfigRepo`), `migrations/`(alembic). 코어는 `core/repos.py`의 Protocol(`CandleRepo`, `Ledger`, `SignalRepo`, `JudgmentRepo`, `PositionRepo`, `ConfigRepo`)만 알고 구현은 주입 (ADR 0008).

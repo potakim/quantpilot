@@ -1,6 +1,8 @@
 """엔진 진입점 — 시장 하나의 실시간 배선 (01 §3, 04 §7).
 
 체결(WS) → on_stop_check(손절) → CandleAggregator → 봉 확정 → CandleStore 저장 → TickRunner.on_bars_closed.
+EngineLink가 있으면 타이머가 link_every초마다 하트비트를 쓰고, scheduler가 넣은 시간 청산 명령을
+TickRunner.on_time_exit로 실행한 뒤 ack한다 (04 §8).
 
 같은 구간의 봉은 심볼마다 확정 시점이 다르다(다음 체결이 먼저 오면 즉시, 아니면 마감 + grace 타이머).
 여러 심볼을 보는 전략이 한 시각에 한 번만 평가되도록, 확정된 봉은 그 구간의 마감 + grace까지 모았다가
@@ -15,12 +17,17 @@ import asyncio
 import logging
 from collections import defaultdict
 from collections.abc import Sequence
+from datetime import datetime
+from typing import TYPE_CHECKING
 
 from quantpilot.core.events import BarClosed, TradeEvent
-from quantpilot.core.ports import Clock
+from quantpilot.core.ports import Clock, EngineLink
 from quantpilot.data.aggregator import CandleAggregator
 from quantpilot.data.store import CandleStore
 from quantpilot.engine.tick import TickRunner
+
+if TYPE_CHECKING:
+    from quantpilot.db.repo import Sessions
 
 log = logging.getLogger(__name__)
 
@@ -35,12 +42,17 @@ class MarketEngine:
         clock: Clock,
         *,
         store: CandleStore | None = None,
+        link: EngineLink | None = None,
+        link_every: float = 5.0,
     ):
         self.runner = runner
         self.aggregator = aggregator
         self.clock = clock
         self.store = store
+        self.link = link
+        self.link_every = link_every
         self._closed: list[BarClosed] = []
+        self._last_link: datetime | None = None
 
     async def on_trade(self, ev: TradeEvent) -> None:
         """체결 1건: 손절 검사(판단 모델 없음) 후 봉 집계."""
@@ -52,6 +64,7 @@ class MarketEngine:
     async def on_timer(self) -> int:
         """마감 + grace가 지난 구간의 봉을 시각별 묶음으로 넘긴다. 넘긴 봉 수를 돌려준다."""
         now = self.clock.now()
+        await self.on_link(now)
         self._closed += self.aggregator.on_timer(now)
         span, grace = self.aggregator.span, self.aggregator.grace
         due = [b for b in self._closed if now >= b.ts + span + grace]
@@ -67,6 +80,26 @@ class MarketEngine:
             await self.runner.on_bars_closed(groups[ts])
         return len(due)
 
+    async def on_link(self, now: datetime) -> None:
+        """하트비트를 쓰고 scheduler의 시간 청산 명령을 처리한다 (link_every초마다)."""
+        if self.link is None:
+            return
+        if (
+            self._last_link is not None
+            and (now - self._last_link).total_seconds() < self.link_every
+        ):
+            return
+        self._last_link = now
+        market = self.runner.market
+        await self.link.beat(market)
+        for s in self.runner.strategies:
+            cmd_id = await self.link.pending_time_exit(market, s.name)
+            if cmd_id is None:
+                continue
+            log.info("time_exit 명령 처리", extra={"strategy": s.name, "cmd": cmd_id})
+            await self.runner.on_time_exit(s.name)
+            await self.link.ack_time_exit(market, s.name, cmd_id)
+
     async def run(self, stream, *, interval: float = 1.0) -> None:
         """스트림(run()이 체결을 on_trade로 넘김)과 타이머를 함께 돌린다."""
 
@@ -80,8 +113,14 @@ class MarketEngine:
             tg.create_task(timer())
 
 
-def build_upbit_paper(strategy_names: Sequence[str] = ("vol_breakout",)) -> MarketEngine:
-    """업비트 페이퍼 엔진 배선. 판단 파이프라인은 P1-07/08 전까지 StubPipeline(게이팅 OFF)."""
+def build_upbit_paper(
+    strategy_names: Sequence[str] = ("vol_breakout",), *, sessions: Sessions | None = None
+) -> MarketEngine:
+    """업비트 페이퍼 엔진 배선. 판단 파이프라인은 P1-07/08 전까지 StubPipeline(게이팅 OFF).
+
+    sessions가 있으면 계좌를 DB에 저장하는 PersistentPaperBroker + OrderExecutor(원장 기록)를 쓰고,
+    scheduler와 settings 우편함(SettingsEngineLink)으로 연결한다. 시작 전에 `restore()`를 불러야 한다.
+    """
     from quantpilot.backtest.costs import preset
     from quantpilot.config import settings
     from quantpilot.core.clock import MarketClock
@@ -99,20 +138,43 @@ def build_upbit_paper(strategy_names: Sequence[str] = ("vol_breakout",)) -> Mark
     market = Market.UPBIT
     strategies = [create(n) for n in strategy_names]
     risk = RiskManager()
-    broker = PaperBroker(market, preset(market), settings.initial_cash_krw)
     clock = MarketClock(market)
+    link = None
+    if sessions is None:
+        executor = DirectExecutor(
+            PaperBroker(market, preset(market), settings.initial_cash_krw), risk
+        )
+    else:
+        from quantpilot.db.repo import SqlConfigRepo, SqlLedger, SqlPositionRepo, SqlSignalRepo
+        from quantpilot.engine.link import SettingsEngineLink
+        from quantpilot.execution.executor import OrderExecutor
+        from quantpilot.execution.persistent_paper import PersistentPaperBroker
+        from quantpilot.execution.ratelimit import NoLimiter
+
+        config = SqlConfigRepo(sessions)
+        broker = PersistentPaperBroker(
+            market,
+            preset(market),
+            settings.initial_cash_krw,
+            positions=SqlPositionRepo(sessions),
+            config=config,
+        )
+        executor = OrderExecutor(
+            broker, risk, SqlLedger(sessions), NoLimiter(), signals=SqlSignalRepo(sessions)
+        )
+        link = SettingsEngineLink(config)
     runner = TickRunner(
         market,
         strategies,
         StubFeatureBuilder(market.value),
         StubPipeline(),
-        DirectExecutor(broker, risk),
+        executor,
         risk,
         clock,
         _LogBus(),
         cost=preset(market),
     )
-    return MarketEngine(runner, CandleAggregator("1m", market), clock)
+    return MarketEngine(runner, CandleAggregator("1m", market), clock, link=link)
 
 
 class _LogBus:
@@ -125,13 +187,20 @@ class _LogBus:
 
 def main() -> None:
     """업비트 페이퍼 엔진 실행 (네트워크 필요)."""
+    from quantpilot.config import settings
     from quantpilot.data.upbit_ws import UpbitStream
+    from quantpilot.db.session import make_sessions
 
     logging.basicConfig(level=logging.INFO)
-    engine = build_upbit_paper()
+    engine = build_upbit_paper(sessions=make_sessions(settings.db_url))
     symbols = sorted({s for st in engine.runner.strategies for s in st.symbols})
     stream = UpbitStream(symbols, on_trade=engine.on_trade)
-    asyncio.run(engine.run(stream))
+
+    async def _run() -> None:
+        await engine.runner.executor.broker.restore()
+        await engine.run(stream)
+
+    asyncio.run(_run())
 
 
 if __name__ == "__main__":

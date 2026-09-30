@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -13,6 +13,7 @@ from quantpilot.core.models import Fill, JudgeResult, Market, Order, Position, T
 from quantpilot.db.mappers import (
     bar_to_row,
     fill_to_row,
+    from_db_ts,
     order_to_row,
     position_to_row,
     row_to_bar,
@@ -23,6 +24,8 @@ from quantpilot.db.mappers import (
 )
 from quantpilot.db.models import (
     CandleRow,
+    DailyReviewRow,
+    EquitySnapshotRow,
     FillRow,
     JudgmentRow,
     OrderRow,
@@ -185,6 +188,32 @@ class SqlJudgmentRepo:
             row = await s.get_one(JudgmentRow, judgment_id)
             row.realized_ret_24h, row.direction_hit = ret_24h, direction_hit
 
+    async def pending_realized(self, before: datetime, *, limit: int = 500) -> list[dict[str, Any]]:
+        """before(UTC) 이전에 내려졌는데 24h 실현 수익률이 비어 있는 판단. 시각은 시장 현지 tz-naive."""
+        q = (
+            select(JudgmentRow, SignalRow)
+            .join(SignalRow, JudgmentRow.signal_id == SignalRow.id)
+            .where(JudgmentRow.realized_ret_24h.is_(None), JudgmentRow.ts <= before)
+            .order_by(JudgmentRow.ts)
+            .limit(limit)
+        )
+        async with self._sessions() as s:
+            rows = (await s.execute(q)).all()
+        out = []
+        for j, sig in rows:
+            market = Market(sig.market)
+            out.append(
+                {
+                    "id": j.id,
+                    "ts": from_db_ts(j.ts, market),
+                    "market": market,
+                    "symbol": sig.symbol,
+                    "weight": sig.weight,
+                    "price_hint": sig.price_hint,
+                }
+            )
+        return out
+
     async def get(self, judgment_id: int) -> dict[str, Any] | None:
         """판단 1건을 dict로 조회한다."""
         async with self._sessions() as s:
@@ -268,6 +297,48 @@ class SqlConfigRepo:
             q = q.where(StrategyConfigRow.market == Market(market).value)
         async with self._sessions() as s:
             rows = (await s.scalars(q)).all()
+        return [_row_dict(r) for r in rows]
+
+
+class SqlOpsRepo:
+    """운영 기록: 평가액 스냅샷(equity_snapshots)·일일 리뷰(daily_reviews)."""
+
+    def __init__(self, sessions: Sessions) -> None:
+        self._sessions = sessions
+
+    async def add_equity_snapshot(
+        self, *, market: Market, ts: datetime, cash: float, equity: float, paper: bool = True
+    ) -> None:
+        """평가액 1건을 쓴다. 같은 (ts, market, paper)면 덮어쓴다."""
+        row = EquitySnapshotRow(
+            ts=to_db_ts(ts, market),
+            market=Market(market).value,
+            paper=paper,
+            cash=cash,
+            equity=equity,
+        )
+        async with self._sessions.begin() as s:
+            await s.merge(row)
+
+    async def save_daily_review(
+        self, day: date, *, summary: str, stats: dict[str, Any], cost_usd: float | None = None
+    ) -> None:
+        """그날 리뷰를 쓴다. 같은 날짜면 덮어쓴다."""
+        row = DailyReviewRow(day=day, summary=summary, stats=stats, cost_usd=cost_usd)
+        async with self._sessions.begin() as s:
+            await s.merge(row)
+
+    async def daily_review(self, day: date) -> dict[str, Any] | None:
+        """그날 리뷰를 dict로 조회한다."""
+        async with self._sessions() as s:
+            row = await s.get(DailyReviewRow, day)
+        return None if row is None else _row_dict(row)
+
+    async def equity_snapshots(self, market: Market) -> list[dict[str, Any]]:
+        """시장의 평가액 스냅샷 전부(시간순)."""
+        q = select(EquitySnapshotRow).where(EquitySnapshotRow.market == Market(market).value)
+        async with self._sessions() as s:
+            rows = (await s.scalars(q.order_by(EquitySnapshotRow.ts))).all()
         return [_row_dict(r) for r in rows]
 
 

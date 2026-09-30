@@ -1,6 +1,6 @@
 # 0012 · TypeSafe Jev 어댑터 계약: score 정규화·비동기 판단·실패는 hold·질문 문구 파일
 
-상태: 제안 (2026-09-30) — 운영자 승인 대기
+상태: 승인 (2026-09-30)
 
 ## 맥락
 P1-07에서 0단계 자리표시자(`StubJudge`)를 실제 TypeSafe Jev 호출로 채운다. TypeSafe 공식 문서(quickstart·primitives/choice·score·confidence, 2026-09-30 조회)의 계약과 기존 설계 사이에 네 군데가 어긋난다.

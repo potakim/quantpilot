@@ -1,25 +1,33 @@
-"""이벤트 리플레이 백테스터.
+"""이벤트 리플레이 백테스터 — 실전과 같은 `engine.tick.TickRunner`로 봉을 재생한다 (ADR 0002·0010).
 
-- 전략의 `on_bar`를 봉마다(월간 전략은 월말 봉에만) 호출하고, 반환된 Target을 같은 봉 안에서 체결한다.
+- 배선: TickRunner + PaperBroker + DirectExecutor + StubPipeline(StubJudge, 게이팅 OFF) + ReplayClock.
+  전략·사이징·주문 경로 코드는 페이퍼·실전과 같고, 주입하는 부품만 다르다. 전략에 '백테스트 모드' 분기가 없다.
+- 리스크: 기본은 UnrestrictedRisk(계좌 규칙 미적용, 0단계와 같은 '전략 자체 성과'). apply_risk=True면 RiskManager.
 - 체결가: Target.price가 있으면 그 가격(봉의 고가·저가 범위로 클립), 없으면 종가. 여기에 CostModel의
   슬리피지·수수료·세금을 반드시 적용한다. 비용 0은 allow_zero_cost=True를 명시해야만 가능하다.
 - 홀드아웃: 마지막 holdout_months 개월은 기본적으로 잘라낸다. unlock_holdout=True는 실전 전환 직전 1회용.
-- 실전과 같은 전략 코드를 쓴다. 전략에 '백테스트 모드' 분기가 없다.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-import numpy as np
 import pandas as pd
 
 from quantpilot.backtest import metrics as M
 from quantpilot.backtest.costs import ZERO, CostModel
-from quantpilot.core.models import Fill, Position, Side, Target
-from quantpilot.strategies.base import Context, Strategy
+from quantpilot.core.events import BarClosed, FillEvent
+from quantpilot.core.models import Fill, Market, Side
+from quantpilot.strategies.base import Strategy
+
+if TYPE_CHECKING:
+    from quantpilot.engine.replay import ReplayClock
+    from quantpilot.engine.tick import TickRunner
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +71,7 @@ class Backtester:
         allow_zero_cost: bool = False,
         allow_short: bool = False,
         min_trade_frac: float = 0.002,
+        apply_risk: bool = False,
     ):
         if cost == ZERO and not allow_zero_cost:
             raise ValueError(
@@ -74,6 +83,7 @@ class Backtester:
         self.unlock_holdout = unlock_holdout
         self.allow_short = allow_short
         self.min_trade_frac = min_trade_frac
+        self.apply_risk = apply_risk
 
     # ---------- 데이터 준비 ----------
     def _prepare(
@@ -101,152 +111,58 @@ class Backtester:
             }  # 컷으로 생긴 부분월은 월말이 아니다
         return out, cutoff, month_last
 
-    @staticmethod
-    def _increases(
-        t: Target,
-        visible: Mapping[str, pd.DataFrame],
-        positions: Mapping[str, Position],
-        equity: float,
-    ) -> bool:
-        """이 Target이 현재 보유 가치보다 비중을 늘리는 주문인지 (체결 순서 정렬용)."""
-        if t.weight == 0 or t.symbol not in visible:
-            return False
-        pos = positions.get(t.symbol)
-        held = pos.qty * float(visible[t.symbol]["close"].iloc[-1]) if pos else 0.0
-        return t.weight * equity > held
-
     # ---------- 실행 ----------
     def run(
         self, strategy: Strategy, data: Mapping[str, pd.DataFrame], attempts=None
     ) -> BacktestResult:
+        """TickRunner로 봉을 하나씩 재생한다. 실전과 같은 on_bar·사이징·risk.check→submit 경로."""
+        # engine → execution → paper → backtest 순환 import를 피하려고 여기서 불러온다
+        from quantpilot.engine.history import BarHistory
+        from quantpilot.engine.replay import (
+            CollectingBus,
+            DirectExecutor,
+            ReplayClock,
+            StubFeatureBuilder,
+            UnrestrictedRisk,
+        )
+        from quantpilot.engine.tick import TickRunner
+        from quantpilot.execution.paper import PaperBroker
+        from quantpilot.execution.risk import RiskManager
+        from quantpilot.judgment.stub import StubJudge, StubPipeline
+
         bars, cutoff, month_last = self._prepare(data)
         if not bars:
             raise ValueError("홀드아웃을 제외하면 데이터가 없습니다")
-        timeline = sorted(set().union(*[set(df.index) for df in bars.values()]))
-        monthly = strategy.timeframe == "1M"
+        market = Market(strategy.market)
+        clock = ReplayClock(month_last)
+        broker = PaperBroker(market, self.cost, self.initial_cash, allow_short=self.allow_short)
+        risk = RiskManager() if self.apply_risk else UnrestrictedRisk()
+        bus = CollectingBus(("tick", "fill"))
+        runner = TickRunner(
+            market,
+            [strategy],
+            StubFeatureBuilder(market.value),
+            StubPipeline(StubJudge(), gating=False),
+            DirectExecutor(broker, risk),
+            risk,
+            clock,
+            bus,
+            cost=self.cost,
+            history=BarHistory(bars),
+            allow_short=self.allow_short,
+            min_trade_frac=self.min_trade_frac,
+        )
+        tf = "1d" if strategy.timeframe == "1M" else strategy.timeframe
+        by_ts: dict[pd.Timestamp, list[BarClosed]] = defaultdict(list)
+        for sym, df in bars.items():
+            for ts, o, h, lo, c, v in df.itertuples(name=None):
+                by_ts[ts].append(BarClosed(market, sym, tf, ts.to_pydatetime(), o, h, lo, c, v))
+        equity = asyncio.run(self._replay(runner, clock, by_ts))
 
-        cash = self.initial_cash
-        positions: dict[str, Position] = {}
-        fills: list[Fill] = []
-        equity_curve: dict[pd.Timestamp, float] = {}
-        trade_returns: list[float] = []
-        cost_basis: dict[str, float] = {}
-        warnings: list[str] = []
-        turnover = 0.0
-        total_costs = 0.0
-        last_price: dict[str, float] = {}
-
-        for ts in timeline:
-            ts = pd.Timestamp(ts)
-            visible = {}
-            for sym, df in bars.items():
-                k = df.index.searchsorted(ts, side="right")
-                if k == 0:
-                    continue
-                visible[sym] = df.iloc[:k]
-                if df.index[k - 1] == ts:
-                    last_price[sym] = float(df["close"].iloc[k - 1])
-            if not visible:
-                continue
-
-            equity = cash + sum(
-                p.qty * last_price.get(s, p.avg_price) for s, p in positions.items()
-            )
-            targets: list[Target] = []
-            ready = all(
-                len(v) >= strategy.warmup_bars for s, v in visible.items() if s in strategy.symbols
-            ) and any(s in visible for s in strategy.symbols)
-            if ready and (not monthly or ts in month_last):
-                ctx = Context(
-                    ts=ts, bars=visible, positions=positions, equity=equity, params=strategy.params
-                )
-                targets = strategy.on_bar(ctx) or []
-
-            # 청산 우선: 비중을 줄이는 주문을 먼저 체결해야 그 현금으로 늘리는 주문을 낼 수 있다.
-            # 정렬은 안정적이라 같은 그룹 안에서는 전략이 준 순서를 지킨다.
-            grows = [self._increases(t, visible, positions, equity) for t in targets]
-            targets = [t for _, t in sorted(zip(grows, targets), key=lambda p: p[0])]
-
-            for t in targets:
-                if t.symbol not in visible or visible[t.symbol].index[-1] != ts:
-                    continue  # 이 봉에 데이터 없는 심볼
-                bar = visible[t.symbol].iloc[-1]
-                ref = (
-                    float(bar["close"])
-                    if t.price is None
-                    else float(np.clip(t.price, bar["low"], bar["high"]))
-                )
-                if t.price is not None and not (bar["low"] <= t.price <= bar["high"]):
-                    warnings.append(
-                        f"{ts.date()} {t.symbol}: 지정가 {t.price:.4g} 봉 범위 밖 → 클립"
-                    )
-                if t.weight < 0 and not self.allow_short:
-                    continue
-                pos = positions.get(t.symbol) or Position(t.symbol, strategy=strategy.name)
-                target_value = t.weight * equity
-                current_value = pos.qty * ref
-                delta_value = target_value - current_value
-                if abs(delta_value) < self.min_trade_frac * equity and t.weight != 0:
-                    continue
-                if t.weight == 0 and not pos.is_open:
-                    continue
-                side = Side.BUY if delta_value > 0 else Side.SELL
-                px = self.cost.fill_price(ref, side)
-                qty = abs(delta_value) / px
-                if side == Side.BUY and qty * px * (1 + self.cost.fee_rate) > cash + 1e-9:
-                    qty = max(
-                        0.0, cash / (px * (1 + self.cost.fee_rate))
-                    )  # 현금 한도 (수수료 포함)
-                if qty <= 0:
-                    continue
-                gross = qty * px
-                fee, tax = self.cost.fee(gross), self.cost.tax(gross, side)
-                total_costs += fee + tax
-                turnover += gross / max(equity, 1e-9)
-
-                if side == Side.BUY:
-                    cash -= gross + fee
-                    new_qty = pos.qty + qty
-                    pos.avg_price = (
-                        (pos.avg_price * pos.qty + px * qty) / new_qty if new_qty else 0.0
-                    )
-                    pos.qty = new_qty
-                    pos.opened_at = pos.opened_at or ts
-                    cost_basis[t.symbol] = cost_basis.get(t.symbol, 0.0) + gross + fee
-                else:
-                    cash += gross - fee - tax
-                    basis_before = cost_basis.get(t.symbol, 0.0)
-                    frac = min(1.0, qty / pos.qty) if pos.qty else 0.0
-                    realized_basis = basis_before * frac
-                    cost_basis[t.symbol] = basis_before - realized_basis
-                    pos.qty -= qty
-                    if realized_basis > 0:
-                        trade_returns.append((gross - fee - tax) / realized_basis - 1)
-                    if not pos.is_open:
-                        pos.qty, pos.avg_price, pos.opened_at = 0.0, 0.0, None
-                        cost_basis.pop(t.symbol, None)
-                positions[t.symbol] = pos
-                fills.append(
-                    Fill(
-                        order_id="bt",
-                        symbol=t.symbol,
-                        side=side,
-                        qty=qty,
-                        price=px,
-                        fee=fee,
-                        tax=tax,
-                        ts=ts.to_pydatetime(),
-                        strategy=strategy.name,
-                        reason=t.reason,
-                    )
-                )
-
-            equity_curve[ts] = cash + sum(
-                p.qty * last_price.get(s, p.avg_price) for s, p in positions.items()
-            )
-
-        eq = pd.Series(equity_curve).sort_index()
+        eq = pd.Series(equity).sort_index()
+        fills, trade_returns, total_costs, turnover = _fill_stats(bus.events)
         m = M.compute(eq, trade_returns, total_costs, turnover, initial_equity=self.initial_cash)
+        warnings = list(runner.warnings)
         att = (
             attempts.record(strategy.name, strategy.params, strategy.symbols) if attempts else None
         )
@@ -257,3 +173,48 @@ class Backtester:
         return BacktestResult(
             strategy.name, dict(strategy.params), m, eq, fills, cutoff, warnings, att
         )
+
+    @staticmethod
+    async def _replay(
+        runner: TickRunner, clock: ReplayClock, by_ts: Mapping[pd.Timestamp, list[BarClosed]]
+    ) -> dict[pd.Timestamp, float]:
+        """타임라인 순서로 봉 묶음을 TickRunner에 넣고 봉마다 평가액을 기록한다."""
+        equity: dict[pd.Timestamp, float] = {}
+        for ts in sorted(by_ts):
+            clock.set(ts.to_pydatetime())
+            await runner.on_bars_closed(by_ts[ts])
+            equity[ts] = runner.executor.equity()
+        return equity
+
+
+def _fill_stats(events: list[tuple[str, object]]) -> tuple[list[Fill], list[float], float, float]:
+    """발행된 tick·fill 이벤트 → (체결, 거래별 수익률, 총비용, 회전율). 회전율은 틱 시작 평가액 기준."""
+    fills: list[Fill] = []
+    trade_returns: list[float] = []
+    total_costs = turnover = 0.0
+    tick_equity = 0.0
+    held: dict[str, float] = {}
+    basis: dict[str, float] = {}
+    for _, ev in events:
+        if not isinstance(ev, FillEvent):
+            tick_equity = ev.equity  # type: ignore[attr-defined]  # TickSnapshot
+            continue
+        f = ev.fill
+        fills.append(f)
+        total_costs += f.fee + f.tax
+        turnover += f.gross / max(tick_equity, 1e-9)
+        qty = held.get(f.symbol, 0.0)
+        if f.side == Side.BUY:
+            held[f.symbol] = qty + f.qty
+            basis[f.symbol] = basis.get(f.symbol, 0.0) + f.gross + f.fee
+        else:
+            before = basis.get(f.symbol, 0.0)
+            realized = before * (min(1.0, f.qty / qty) if qty else 0.0)
+            basis[f.symbol] = before - realized
+            held[f.symbol] = qty - f.qty
+            if realized > 0:
+                trade_returns.append((f.gross - f.fee - f.tax) / realized - 1)
+            if abs(held[f.symbol]) <= 1e-12:
+                held[f.symbol] = 0.0
+                basis.pop(f.symbol, None)
+    return fills, trade_returns, total_costs, turnover

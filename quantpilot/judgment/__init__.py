@@ -10,7 +10,7 @@ from quantpilot.judgment.base import (
     gate,
     hard_blocks,
 )
-from quantpilot.judgment.stub import AlwaysApprove, StubJudge, StubLLM
+from quantpilot.judgment.stub import AlwaysApprove, StubJudge, StubLLM, StubPipeline
 
 __all__ = [
     "DEFAULT_QUESTIONS",
@@ -23,6 +23,7 @@ __all__ = [
     "State",
     "StubJudge",
     "StubLLM",
+    "StubPipeline",
     "decide",
     "gate",
     "hard_blocks",

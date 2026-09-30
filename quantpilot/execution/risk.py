@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -148,7 +147,7 @@ class RiskManager:
         if opposite in sides:
             return RiskDecision(False, 0.0, "자전거래 방지: 반대 방향 미체결 주문 존재")
         q = self._order_times.setdefault(order.symbol, deque(maxlen=64))
-        t = time.monotonic()
+        t = now.timestamp()  # check(now=)의 시각 — 가짜 clock 재생에서도 1초 창이 맞다 (ADR 0010)
         while q and t - q[0] > 1.0:
             q.popleft()
         if len(q) >= self.rules.max_orders_per_symbol_per_sec:

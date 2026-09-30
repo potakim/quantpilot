@@ -41,11 +41,13 @@ class FeatureBuilder:
 
 ## 4. judgment
 
-0단계 인터페이스 유지. 1단계 구현체:
+0단계 인터페이스 유지. `JudgeProvider`에 비동기 `ajudge()`가 추가됐다(기본 구현은 `judge()` 호출, ADR 0012). 1단계 구현체:
 
 | 파일 | 클래스 | 비고 |
 | --- | --- | --- |
-| `typesafe.py` | `TypeSafeJudge(api_key, model="jev-latest", timeout=3.0)` | `POST https://api.typesafe.ai/v1/systemone`. 원자 질문 6개를 한 요청에. 응답의 `confidence`는 질문별 최솟값을 `JudgeResult.confidence`로 (보수적) |
+| `typesafe.py` | `TypeSafeJudge(api_key, model="jev-latest", timeout=3.0, *, base_url, questions_version="v1")` | `POST https://api.typesafe.ai/v1/systemone`. 원자 질문 6개를 한 요청에. 응답의 `confidence`는 질문별 최솟값을 `JudgeResult.confidence`로 (보수적). score(0..N-1 단계)는 `/(N-1)`로 0~1. `ajudge()`는 총 3초 초과 → `JudgeTimeout`, HTTP·계약 위반 → `JudgeError` (ADR 0012). 키는 `from_settings()`로 `QP_TYPESAFE_API_KEY`에서 |
+| `questions/` | `load_questions("v1") -> QuestionSet` | `v1.yaml`의 `instructions`·`criteria`와 `prompt_hash`. 키·종류·옵션은 `base.py::DEFAULT_QUESTIONS`와 같아야 함 |
+| `pricing.py` | `cost_usd(model, input_tokens, output_tokens)`, `price_for(model)` | USD/100만 토큰 단가표. 모델명 최장 접두사로 찾고, 없으면 `ValueError` |
 | `laya.py` | `LayaJudge(base_url)` | 자체 호스팅 HTTP. 같은 스키마 |
 | `anthropic.py` | `ClaudeReviewer(model="claude-sonnet-5")` | `review()` + `daily_review()` + `answer_question()` |
 | `google.py` | `GeminiReviewer(model="gemini-3.5-flash")`, `GeminiSummarizer(model="gemini-3.5-flash-lite")` | 리뷰 / 뉴스 요약 |

@@ -68,6 +68,12 @@ class JudgeProvider(ABC):
         self, state: State, questions: tuple[Question, ...] = DEFAULT_QUESTIONS
     ) -> JudgeResult: ...
 
+    async def ajudge(
+        self, state: State, questions: tuple[Question, ...] = DEFAULT_QUESTIONS
+    ) -> JudgeResult:
+        """틱 루프용 비동기 판단. 네트워크 어댑터는 이벤트 루프를 막지 않도록 재정의한다 (ADR 0012)."""
+        return self.judge(state, questions)
+
 
 @dataclass
 class LLMVerdict:

@@ -25,7 +25,11 @@ class RateLimited(BrokerError):
         self.retry_after = retry_after
 
 
-class JudgeTimeout(QuantPilotError):
+class JudgeError(QuantPilotError):
+    """판단 모델·LLM 호출 실패 (HTTP 오류·응답 계약 위반). 파이프라인은 hold로 처리한다 (ADR 0012)."""
+
+
+class JudgeTimeout(JudgeError):
     """판단 모델·LLM 응답 시간 초과. 파이프라인은 hold로 처리한다."""
 
 

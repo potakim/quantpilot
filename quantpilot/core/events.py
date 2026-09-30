@@ -58,6 +58,7 @@ class JudgmentEvent:
     size_multiplier: float
     ts: datetime
     blocks: tuple[str, ...] = ()
+    verdicts: tuple[Any, ...] = ()  # judgment.base.LLMVerdict (LLM 합의를 거친 경우만)
 
 
 @dataclass(frozen=True)

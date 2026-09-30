@@ -162,7 +162,10 @@ class SqlJudgmentRepo:
         blocks: list[str],
         ts: datetime,
     ) -> int:
-        """판단 1회를 기록하고 id를 돌려준다."""
+        """판단 1회를 기록하고 id를 돌려준다. 질문 문구 prompt_hash는 state jsonb에 함께 둔다 (ADR 0014)."""
+        prompt_hash = (result.raw or {}).get("prompt_hash")
+        if prompt_hash:
+            state = {**state, "prompt_hash": prompt_hash}
         row = JudgmentRow(
             signal_id=signal_id,
             provider=result.model,

@@ -172,7 +172,7 @@ describe("applyMessage", () => {
   it("portfolio → 시장별 평가액 + seq", () => {
     const s = applyMessage(s0, { ch: "portfolio", ts: "t1", data: { market: "krx", equity: 5 } });
     expect(s.equity).toEqual({ krx: { equity: 5, ts: "t1" } });
-    expect(s.seq.portfolio).toBe(1);
+    expect(s.seq!.portfolio).toBe(1);
   });
 
   it("judgments → 앞에 붙이고 20건까지, 같은 id는 교체", () => {
@@ -194,8 +194,8 @@ describe("applyMessage", () => {
       ts: "t",
       data: { name: "vol_breakout", enabled: true, position: {}, next_action: { at: "a", what: "b" } },
     });
-    expect(s.strategyStatus.vol_breakout).toMatchObject({ enabled: true, next_action: { what: "b" } });
-    expect(s.seq.strategy).toBe(1);
+    expect(s.strategyStatus!.vol_breakout).toMatchObject({ enabled: true, next_action: { what: "b" } });
+    expect(s.seq!.strategy).toBe(1);
   });
 
   it("ticks:{m}:{s} → 마지막 가격", () => {
@@ -204,7 +204,7 @@ describe("applyMessage", () => {
       ts: "t",
       data: { price: 61_000_000, volume: 0.1, side: "buy" },
     });
-    expect(s.ticks["upbit:KRW-BTC"]).toEqual({ price: 61_000_000, volume: 0.1, side: "buy", ts: "t" });
+    expect(s.ticks!["upbit:KRW-BTC"]).toEqual({ price: 61_000_000, volume: 0.1, side: "buy", ts: "t" });
   });
 
   it("orderbook·fills", () => {

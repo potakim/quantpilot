@@ -47,3 +47,93 @@ jobs:
 
       - name: ruff format --check
         run: uv run --no-sync ruff format --check .
+
+  # 웹 화면 (P1-13, ADR 0018). Node 도구는 web/ 안에만 있다 — 위 python 잡과 따로 돈다.
+  #   1. eslint(+jsx-a11y) · tsc · vitest · next build · 비밀 누출 검사(check-secrets)
+  #   2. 데모 API(scripts/web_demo_api.py, 합성 데이터) + next start
+  #   3. Lighthouse 접근성 90+ — 데스크톱 4화면(lighthouserc.json) + 모바일 대시보드(lighthouserc.mobile.json)
+  # 데모 API 비밀번호·시크릿은 실행마다 무작위로 만든다 (저장소에 값 없음).
+  web:
+    name: web (lint · test · build · lighthouse)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: web
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      QP_API_URL: http://127.0.0.1:8000
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 데모 비밀번호·시크릿 생성 (실행마다 무작위)
+        run: |
+          pw=$(openssl rand -hex 16)
+          secret=$(openssl rand -hex 32)
+          echo "::add-mask::$pw"
+          echo "::add-mask::$secret"
+          {
+            echo "QP_ADMIN_PASSWORD=$pw"
+            echo "LHCI_PASSWORD=$pw"
+            echo "QP_JWT_SECRET=$secret"
+          } >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: npm ci
+        run: npm ci --no-audit --no-fund
+
+      - name: lint (eslint + jsx-a11y)
+        run: npm run lint
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: test (vitest)
+        run: npm test
+
+      - name: build
+        run: npm run build
+
+      - name: 비밀 누출 검사
+        run: npm run check-secrets
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+
+      - name: 데모 API 의존성
+        working-directory: .
+        run: |
+          uv venv
+          uv pip install -e ".[dev]"
+
+      - name: 데모 API + next start
+        run: |
+          (cd .. && nohup uv run --no-sync python scripts/web_demo_api.py > /tmp/demo-api.log 2>&1 &)
+          nohup npm run start -- -p 3000 > /tmp/next.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8000/health > /dev/null && curl -sf http://127.0.0.1:3000/login > /dev/null && exit 0
+            sleep 2
+          done
+          cat /tmp/demo-api.log /tmp/next.log
+          exit 1
+
+      - name: Lighthouse 접근성 90+
+        run: |
+          npm install --no-save --no-audit --no-fund @lhci/cli@0.15.1 puppeteer@24
+          npx lhci autorun --config=./lighthouserc.json
+          npx lhci autorun --config=./lighthouserc.mobile.json
+
+      - name: Lighthouse 리포트
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse
+          path: web/.lighthouseci
+          if-no-files-found: ignore

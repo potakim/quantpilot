@@ -1,0 +1,29 @@
+{
+  "ci": {
+    "collect": {
+      "url": [
+        "http://localhost:3000/login",
+        "http://localhost:3000/",
+        "http://localhost:3000/trade/upbit/KRW-BTC",
+        "http://localhost:3000/judgments"
+      ],
+      "numberOfRuns": 1,
+      "puppeteerScript": "./lighthouse/login.cjs",
+      "puppeteerLaunchOptions": { "args": ["--no-sandbox"] },
+      "settings": {
+        "preset": "desktop",
+        "onlyCategories": ["accessibility"],
+        "disableStorageReset": true
+      }
+    },
+    "assert": {
+      "assertions": {
+        "categories:accessibility": ["error", { "minScore": 0.9 }]
+      }
+    },
+    "upload": {
+      "target": "filesystem",
+      "outputDir": "./.lighthouseci/reports-desktop"
+    }
+  }
+}

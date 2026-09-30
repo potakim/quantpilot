@@ -205,6 +205,39 @@ async def test_hubbus_judgment_recorded_and_published():
     await engine.dispose()
 
 
+async def test_every_entry_signal_inserts_signal_judgment_and_verdict_rows():
+    """t13 보정 표본: 진입 신호마다 signals·judgments(prompt_hash 포함)·llm_verdicts 행이 쌓인다."""
+    from sqlalchemy import select
+
+    from quantpilot.db.models import JudgmentRow, LlmVerdictRow, SignalRow
+
+    engine, sessions = await memory_sessions()
+    bus = HubBus(MemoryHub(), UP, recorder=EventRecorder.from_sessions(sessions))
+    ts = MarketClock(UP).now()
+    state = State("upbit", SYM, "orb", "breakout")
+    for i, w in enumerate((0.1, 0.2)):
+        await bus.publish("signal", SignalEvent(UP, "orb", Target(SYM, w), "entry", ts))
+        jr = JudgeResult({"news_risk": 0.0}, 0.9, model="typesafe", raw={"prompt_hash": f"jh{i}"})
+        v = (
+            LLMVerdict("claude", True, "ok", prompt_hash=f"rh{i}"),
+            LLMVerdict("gemini", True, "ok", prompt_hash=f"rh{i}"),
+        )
+        await bus.publish("judgment", JudgmentEvent(0, jr, Gate.FULL, 1.0, ts, (), v, state))
+
+    async with sessions() as s:
+        signals = (await s.execute(select(SignalRow).order_by(SignalRow.id))).scalars().all()
+        judgments = (await s.execute(select(JudgmentRow).order_by(JudgmentRow.id))).scalars().all()
+        verdicts = (await s.execute(select(LlmVerdictRow))).scalars().all()
+    assert len(signals) == 2 and len(judgments) == 2 and len(verdicts) == 4
+    assert [j.signal_id for j in judgments] == [sg.id for sg in signals]
+    assert [j.state["prompt_hash"] for j in judgments] == ["jh0", "jh1"]
+    assert {(v.judgment_id, v.prompt_hash) for v in verdicts} == {
+        (judgments[0].id, "rh0"),
+        (judgments[1].id, "rh1"),
+    }
+    await engine.dispose()
+
+
 async def test_judge_down_from_pipeline_reaches_risk_events_and_channel():
     """t10 숙제: 파이프라인의 judge_down RiskEvent를 구독해 risk_events·WS risk로."""
     engine, sessions = await memory_sessions()

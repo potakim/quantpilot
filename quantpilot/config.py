@@ -41,7 +41,8 @@ class Settings(BaseSettings):
     alpaca_secret: str = ""
     typesafe_api_key: str = ""
     anthropic_api_key: str = ""
-    google_api_key: str = ""
+    google_api_key: str = ""  # Gemini 요약기·리뷰어 (judgment/google.py)
+    dart_api_key: str = ""  # OpenDART 공시 목록 (data/news.py, P1-06)
 
     @property
     def cache_dir(self) -> Path:

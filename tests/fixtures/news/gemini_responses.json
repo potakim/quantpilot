@@ -1,0 +1,9 @@
+{
+  "ok": "{\"summary\": \"미국 비트코인 현물 ETF에 이틀 연속 자금 순유입, 규제 이슈 없음\", \"risk_flags\": [], \"risk_score\": 0.1}",
+  "fenced": "```json\n{\"summary\": \"해외 거래소가 이더리움 입출금을 중단, 해킹 의혹\", \"risk_flags\": [\"hack\", \"exchange_outage\"], \"risk_score\": 0.8}\n```",
+  "broken": "{\"summary\": \"잘린 응답",
+  "too_long": "{\"summary\": \"가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차카타파하\", \"risk_flags\": [\"regulation\"], \"risk_score\": 0.3}",
+  "bad_flags": "{\"summary\": \"요약\", \"risk_flags\": [\"buy_now\", \"regulation\", \"regulation\", 7], \"risk_score\": 1.7}",
+  "not_object": "[\"summary\"]",
+  "bool_score": "{\"summary\": \"요약\", \"risk_flags\": [], \"risk_score\": true}"
+}

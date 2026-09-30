@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>코인 뉴스</title>
+    <item>
+      <title>비트코인 현물 ETF 2일 연속 순유입</title>
+      <link>https://news.example.com/a1</link>
+      <description>미국 비트코인 현물 ETF에 이틀 연속 자금이 들어왔다.</description>
+      <pubDate>Wed, 30 Sep 2026 01:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>이더리움 거래소 해킹 의혹, 입출금 중단</title>
+      <link>https://news.example.com/a2</link>
+      <description>한 해외 거래소가 이더리움 입출금을 중단했다.</description>
+      <pubDate>Wed, 30 Sep 2026 02:30:00 +0900</pubDate>
+    </item>
+    <item>
+      <title>  비트코인   현물 ETF 2일 연속 순유입 </title>
+      <link>https://news.example.com/a1</link>
+      <description>같은 기사가 공백만 다르게 다시 들어왔다.</description>
+      <pubDate>Wed, 30 Sep 2026 01:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>오늘의 날씨: 전국 맑음</title>
+      <link>https://news.example.com/a3</link>
+      <description>코인과 무관한 기사.</description>
+      <pubDate>Wed, 30 Sep 2026 00:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>미국 CPI 발표 앞두고 관망</title>
+      <link>https://news.example.com/a4</link>
+      <description>이번 주 CPI 발표.</description>
+      <pubDate>Tue, 29 Sep 2026 23:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

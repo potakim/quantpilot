@@ -1,0 +1,6 @@
+{"status": "000", "message": "정상", "page_no": 1, "page_count": 100, "total_count": 3, "total_page": 1,
+ "list": [
+  {"corp_code": "00126380", "corp_name": "삼성전자", "stock_code": "005930", "corp_cls": "Y", "report_nm": "연결재무제표기준영업(잠정)실적(공정공시)", "rcept_no": "20260930800001", "flr_nm": "삼성전자", "rcept_dt": "20260930", "rm": "유"},
+  {"corp_code": "00999999", "corp_name": "가나다", "stock_code": "123456", "corp_cls": "K", "report_nm": "상장적격성 실질심사 대상 결정", "rcept_no": "20260930900002", "flr_nm": "코스닥시장본부", "rcept_dt": "20260930", "rm": "코"},
+  {"corp_code": "00111111", "corp_name": "무관기업", "stock_code": "999999", "corp_cls": "K", "report_nm": "주주총회소집공고", "rcept_no": "20260930000003", "flr_nm": "무관기업", "rcept_dt": "20260930", "rm": ""}
+ ]}

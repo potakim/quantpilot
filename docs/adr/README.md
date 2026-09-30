@@ -12,3 +12,4 @@
 | 0006 | 저장소는 TimescaleDB + Redis, 단일 VPS Docker Compose | 승인 |
 | 0007 | 홀드아웃 12개월 잠금과 파라미터 시도 카운터 | 승인 |
 | 0008 | 하이퍼테이블은 ts가 PK에 들어가는 테이블만, 스키마는 SQLite에서도 돈다 | 승인 |
+| 0009 | 시장 캘린더는 코어 내장 표로 두고 exchange_calendars는 선택 어댑터로 쓴다 | 승인 |

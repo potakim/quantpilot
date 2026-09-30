@@ -17,3 +17,4 @@
 ## 결과
 - `signals`·`fills`의 오래된 행 압축은 적용되지 않는다. 양이 늘면 월별 파티션을 따로 검토한다.
 - 테스트는 SQLite로 돌지만, TimescaleDB 전용 경로는 실제 PostgreSQL에서 `alembic upgrade head`로 따로 확인해야 한다.
+- §5의 임시 처리는 P1-02에서 `core/clock.py` 기반 변환으로 교체됐다 (ADR 0009 §6).

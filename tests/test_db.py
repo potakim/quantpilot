@@ -1,5 +1,8 @@
 """P1-01 DB 계층: alembic 마이그레이션, dataclass↔ORM 왕복, repo 단위 테스트(SQLite 인메모리)."""
 
+# 엔진 시각은 시장 현지 tz-naive가 규칙이다 (CLAUDE.md, ADR 0009)
+# ruff: noqa: DTZ001
+
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -47,7 +50,7 @@ from quantpilot.db.repo import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-TS = datetime(2026, 9, 29, 0, 5)  # noqa: DTZ001 — tz-naive = UTC로 간주 (ADR 0008 §5)
+TS = datetime(2026, 9, 29, 0, 5)
 
 
 def alembic_cfg(url: str) -> Config:
@@ -145,11 +148,29 @@ def test_position_roundtrip_in_memory():
     assert mappers.row_to_position(mappers.position_to_row(p)) == p
 
 
-def test_aware_timestamp_is_stored_as_utc_and_read_back_naive():
+def test_aware_timestamp_is_stored_as_utc_and_read_back_local_naive():
     kst = datetime(2026, 9, 29, 18, 5, tzinfo=timezone(timedelta(hours=9)))
     row = mappers.fill_to_row(make_fill("o1", ts=kst))
     assert row.ts == datetime(2026, 9, 29, 9, 5, tzinfo=UTC)
-    assert mappers.from_db_ts(row.ts) == datetime(2026, 9, 29, 9, 5)  # noqa: DTZ001
+    assert mappers.from_db_ts(row.ts, Market.UPBIT) == datetime(2026, 9, 29, 18, 5)
+
+
+@pytest.mark.parametrize(
+    ("market", "local", "utc"),
+    [
+        (Market.UPBIT, datetime(2026, 9, 29, 9, 0), datetime(2026, 9, 29, 0, 0, tzinfo=UTC)),
+        (Market.KRX, datetime(2026, 9, 29, 15, 20), datetime(2026, 9, 29, 6, 20, tzinfo=UTC)),
+        (Market.US, datetime(2026, 7, 1, 9, 30), datetime(2026, 7, 1, 13, 30, tzinfo=UTC)),  # EDT
+        (Market.US, datetime(2026, 12, 1, 9, 30), datetime(2026, 12, 1, 14, 30, tzinfo=UTC)),  # EST
+    ],
+    ids=["upbit-kst", "krx-kst", "us-edt", "us-est"],
+)
+def test_naive_timestamp_is_market_local_time(market, local, utc):
+    """ADR 0009 §6: tz-naive는 그 시장 현지시간. 저장은 UTC, 읽으면 현지 naive (SQLite는 tz를 잃음)."""
+    row = mappers.fill_to_row(make_fill("o1", ts=local, market=market))
+    assert row.ts == utc
+    assert mappers.from_db_ts(row.ts, market) == local
+    assert mappers.from_db_ts(row.ts.replace(tzinfo=None), market) == local
 
 
 @pytest.mark.parametrize(

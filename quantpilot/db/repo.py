@@ -8,17 +8,21 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from quantpilot.core.events import BarClosed
 from quantpilot.core.models import Fill, JudgeResult, Market, Order, Position, Target
 from quantpilot.db.mappers import (
+    bar_to_row,
     fill_to_row,
     order_to_row,
     position_to_row,
+    row_to_bar,
     row_to_fill,
     row_to_order,
     row_to_position,
     to_db_ts,
 )
 from quantpilot.db.models import (
+    CandleRow,
     FillRow,
     JudgmentRow,
     OrderRow,
@@ -29,6 +33,35 @@ from quantpilot.db.models import (
 )
 
 Sessions = async_sessionmaker[AsyncSession]
+
+
+class SqlCandleRepo:
+    """확정된 봉 (candles 하이퍼테이블)."""
+
+    def __init__(self, sessions: Sessions) -> None:
+        self._sessions = sessions
+
+    async def upsert(self, bars: list[BarClosed], *, source: str = "ws") -> int:
+        """PK(ts, market, symbol, tf) 기준 merge. 같은 봉이 다시 오면 값을 덮어쓴다."""
+        async with self._sessions.begin() as s:
+            for bar in bars:
+                await s.merge(bar_to_row(bar, source))
+        return len(bars)
+
+    async def load(
+        self, market: Market, symbol: str, tf: str, start: datetime, end: datetime
+    ) -> list[BarClosed]:
+        """start 이상 end 미만 봉을 시간순으로 조회한다."""
+        q = select(CandleRow).where(
+            CandleRow.market == Market(market).value,
+            CandleRow.symbol == symbol,
+            CandleRow.tf == tf,
+            CandleRow.ts >= to_db_ts(start, market),
+            CandleRow.ts < to_db_ts(end, market),
+        )
+        async with self._sessions() as s:
+            rows = (await s.scalars(q.order_by(CandleRow.ts))).all()
+        return [row_to_bar(r) for r in rows]
 
 
 class SqlLedger:

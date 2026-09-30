@@ -6,8 +6,9 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from quantpilot.core import clock
+from quantpilot.core.events import BarClosed
 from quantpilot.core.models import Fill, Market, Order, OrderStatus, OrderType, Position, Side
-from quantpilot.db.models import FillRow, OrderRow, PositionRow
+from quantpilot.db.models import CandleRow, FillRow, OrderRow, PositionRow
 
 
 def to_db_ts(ts: datetime, market: Market) -> datetime:
@@ -142,4 +143,37 @@ def row_to_position(row: PositionRow) -> Position:
         strategy=row.strategy,
         market=Market(row.market),
         stop=row.stop,
+    )
+
+
+def bar_to_row(bar: BarClosed, source: str = "ws") -> CandleRow:
+    """BarClosed → candles 행. ts(봉 시작)는 UTC로 바꿔 쓴다."""
+    market = Market(bar.market)
+    return CandleRow(
+        ts=to_db_ts(bar.ts, market),
+        market=market.value,
+        symbol=bar.symbol,
+        tf=bar.timeframe,
+        open=bar.open,
+        high=bar.high,
+        low=bar.low,
+        close=bar.close,
+        volume=bar.volume,
+        source=source,
+    )
+
+
+def row_to_bar(row: CandleRow) -> BarClosed:
+    """candles 행 → BarClosed (시장 현지 tz-naive)."""
+    market = Market(row.market)
+    return BarClosed(
+        market=market,
+        symbol=row.symbol,
+        timeframe=row.tf,
+        ts=from_db_ts(row.ts, market),
+        open=float(row.open),
+        high=float(row.high),
+        low=float(row.low),
+        close=float(row.close),
+        volume=float(row.volume),
     )

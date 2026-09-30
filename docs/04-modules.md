@@ -101,10 +101,10 @@ class OrderExecutor:
 | 파일 | 내용 |
 | --- | --- |
 | `loader.py` | 0단계 완료 (REST 백필) |
-| `upbit_ws.py` | `UpbitStream(symbols)` — public WS `trade`·`orderbook`. 재접속 백오프, `TradeEvent` 발행 |
+| `upbit_ws.py` | `UpbitStream(symbols, on_trade=...)` — public WS `trade`·`orderbook`. `run()`: 재접속 백오프(기본 1·2·5·5·5초, 다 쓰면 `DataStale`), 30초 무메시지면 재접속. 체결 → `TradeEvent` 콜백, 호가는 `orderbook(symbol)` 최신 스냅샷. `ensure_fresh()`: 30초 넘게 시세 없으면 `DataStale` |
 | `kis_ws.py` | `KISStream(app_key, symbols)` — 체결가·호가·체결통보. approval_key 발급, 41건 제한 관리 |
-| `aggregator.py` | `CandleAggregator(tf)` — `on_trade()` → 봉 마감 시 `BarClosed`. 마감 규칙: 다음 봉 첫 체결 또는 마감+2초 |
-| `store.py` | `CandleStore(db)` — `upsert(bars)`, `load(symbol, tf, start, end)`, 캐시 |
+| `aggregator.py` | `CandleAggregator(tf, market)` — `on_trade()` → 새 구간 첫 체결이면 직전 봉 `BarClosed`, `on_timer(now)` → 마감+2초 지난 봉 확정. 체결 없는 구간은 봉 없음, 확정된 구간의 늦은 체결은 버림. 일봉 경계는 업비트 09:00 KST |
+| `store.py` | `CandleStore(repo: CandleRepo, market)` — `upsert(bars)`, `load(symbol, tf, start, end)` → OHLCV DataFrame(loader 규격, `[start, end)`), 구간 캐시(upsert 시 해당 심볼·주기 폐기) |
 | `news.py` | `NewsCollector(feeds)` — RSS·DART 수집, 중복 제거(`raw_hash`), `GeminiSummarizer`로 요약·위험 플래그 |
 | `events.py` | 이벤트 캘린더 (YAML + 공시) |
 
@@ -147,7 +147,7 @@ APScheduler(AsyncIOScheduler), 잡은 DB에 영속(`SQLAlchemyJobStore`).
 
 ## 9. db
 
-`models.py`(SQLAlchemy), `mappers.py`(dataclass ↔ ORM), `repo.py`(`SqlLedger`, `SqlSignalRepo`, `SqlJudgmentRepo`, `SqlPositionRepo`, `SqlConfigRepo`), `migrations/`(alembic). 코어는 `core/repos.py`의 Protocol(`Ledger`, `SignalRepo`, `JudgmentRepo`, `PositionRepo`, `ConfigRepo`)만 알고 구현은 주입 (ADR 0008).
+`models.py`(SQLAlchemy), `mappers.py`(dataclass ↔ ORM), `repo.py`(`SqlCandleRepo`, `SqlLedger`, `SqlSignalRepo`, `SqlJudgmentRepo`, `SqlPositionRepo`, `SqlConfigRepo`), `migrations/`(alembic). 코어는 `core/repos.py`의 Protocol(`CandleRepo`, `Ledger`, `SignalRepo`, `JudgmentRepo`, `PositionRepo`, `ConfigRepo`)만 알고 구현은 주입 (ADR 0008).
 
 ## 10. api
 

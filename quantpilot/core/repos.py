@@ -5,7 +5,22 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Protocol
 
+from quantpilot.core.events import BarClosed
 from quantpilot.core.models import Fill, JudgeResult, Market, Order, Position, Target
+
+
+class CandleRepo(Protocol):
+    """확정된 봉 저장소 (candles). 시각은 시장 현지 tz-naive로 주고받는다."""
+
+    async def upsert(self, bars: list[BarClosed], *, source: str = "ws") -> int:
+        """(ts, market, symbol, tf) 기준으로 쓰거나 덮어쓰고 처리한 행 수를 돌려준다."""
+        ...
+
+    async def load(
+        self, market: Market, symbol: str, tf: str, start: datetime, end: datetime
+    ) -> list[BarClosed]:
+        """start 이상 end 미만(봉 시작 시각 기준) 봉을 시간순으로 조회한다."""
+        ...
 
 
 class Ledger(Protocol):

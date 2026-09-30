@@ -23,7 +23,9 @@
 
 `confidence`: 프로바이더가 주는 값. TypeSafe는 질문별 confidence를 주므로 **최솟값**을 채택(보수적). 임계값 기본 0.5 / 0.9 (TypeSafe 가이드), 설정 `gate.hold_below`, `gate.full_above`로 0.3~0.7 / 0.7~0.98 범위에서 조정 가능.
 
-질문 문구는 `judgment/questions/v1.yaml`로 빼고 `prompt_hash`를 판단 로그에 남긴다. 문구를 바꾸면 v2로 올리고 4주간 v1과 병행 기록해 Brier를 비교한 뒤 교체.
+score 질문은 TypeSafe 형식상 `criteria` 단계(0..N-1)의 기댓값으로 돌아오므로, 코드가 `score / (N-1)`로 0~1로 바꿔 위 표의 범위를 맞춘다(v1은 5단계, ADR 0012).
+
+질문 문구는 `judgment/questions/v1.yaml`로 빼고 `prompt_hash`를 판단 로그에 남긴다(지금은 `JudgeResult.raw["prompt_hash"]`). 문구를 바꾸면 v2로 올리고 4주간 v1과 병행 기록해 Brier를 비교한 뒤 교체.
 
 ## 3. state 스키마
 
@@ -93,7 +95,8 @@ size_multiplier = 0 | 0.5 | 1.0
 
 | 상황 | 동작 |
 | --- | --- |
-| TypeSafe 3초 타임아웃 | 그 신호 hold. 연속 10회 → `risk_events(judge_down)` + 알림 |
+| TypeSafe 3초 타임아웃 | 그 신호 hold. 연속 10회 → `risk_events(judge_down)` + 알림 (횟수는 `TypeSafeJudge.consecutive_timeouts`) |
+| TypeSafe HTTP 오류·응답 계약 위반 | 그 신호 hold (`JudgeError`, 확신도 0으로 기록. ADR 0012) |
 | TypeSafe 장기 장애 | 설정 `judge.provider=laya`로 전환 (Laya는 파인튜닝판만 허용; zero-shot은 다수클래스 기준선 미만이라 사용 금지) |
 | LLM 한쪽 장애 | 2/2 요구 유지 → 사실상 진입 중단. 설정 `llm.require_all=false`로 임시 완화 가능하되 risk_events에 기록 |
 | 비용 상한 | `settings.ai_budget_usd_daily`(기본 $2) 초과 시 LLM 합의 중단(= hold), 판단 모델은 계속 |

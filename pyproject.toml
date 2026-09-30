@@ -21,6 +21,8 @@ data = [
     "yfinance>=0.2.40",
     "finance-datareader>=0.9.90",
     "pykrx>=1.0.45",
+    # 업비트 웹소켓 (P1-03, data/upbit_ws.py). uvicorn[standard]도 끌어오지만 직접 쓰므로 명시
+    "websockets>=13",
 ]
 brokers = [
     "pyupbit>=0.2.33",

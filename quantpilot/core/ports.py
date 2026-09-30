@@ -7,7 +7,7 @@ FeatureBuilder(P1-06), JudgmentPipeline(P1-07/08), OrderExecutor(P1-05).
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -166,4 +166,32 @@ class EventBus(Protocol):
 
     async def publish(self, topic: str, event: object) -> None:
         """topic 예: tick·signal·judgment·order·fill·warning."""
+        ...
+
+
+class Hub(Protocol):
+    """실시간 허브 (02 §2, ADR 0017): pub/sub 채널 + 상태 캐시 + 주문 큐. 값은 JSON 호환 dict/스칼라."""
+
+    async def publish(self, channel: str, data: dict[str, Any]) -> None:
+        """채널에 메시지 1건. 채널 예: fills·judgments·risk·ticks:upbit:KRW-BTC."""
+        ...
+
+    def listen(self) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+        """모든 채널의 (채널, 메시지)를 받는 비동기 이터레이터 (WS 허브 팬아웃용)."""
+        ...
+
+    async def set(self, key: str, value: Any, *, ttl: float | None = None) -> None:
+        """상태 키를 쓴다. value가 None이면 지운다."""
+        ...
+
+    async def get(self, key: str) -> Any:
+        """상태 키를 읽는다. 없거나 만료면 None."""
+        ...
+
+    async def push(self, queue: str, item: dict[str, Any]) -> None:
+        """큐 끝에 넣는다."""
+        ...
+
+    async def pop(self, queue: str) -> dict[str, Any] | None:
+        """큐 앞에서 꺼낸다. 비었으면 None."""
         ...

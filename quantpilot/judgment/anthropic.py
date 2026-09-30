@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from typing import Any
@@ -104,3 +105,65 @@ class ClaudeReviewer(LLMProvider):
         text = next((b.text for b in resp.content if getattr(b, "type", "") == "text"), "")
         approve, reason = parse_verdict(text)
         return LLMVerdict(self.name, approve, reason, ms, cost, ph)
+
+
+ASK_SYSTEM = (
+    "너는 자동매매 판단 기록을 설명하는 도우미다. 주어진 state·answers·verdicts만 근거로 "
+    "한국어로 짧게 답한다. 매수·매도 권유, 수량·가격·손절가 제시는 하지 않는다. "
+    "근거에 없는 내용은 모른다고 답한다."
+)
+
+
+class ClaudeAnswerer:
+    """판단 로그 '이 판단에 대해 물어보기' (03 §2.5). 설명만 하고 수량·가격은 답하지 않는다 (불변식 #7)."""
+
+    def __init__(
+        self,
+        model: str = "claude-sonnet-5",
+        *,
+        api_key: str | None = None,
+        client: Any = None,
+        max_tokens: int = 600,
+    ) -> None:
+        price_for(model)
+        self.model = model
+        self.max_tokens = max_tokens
+        if client is None:
+            if anthropic is None:
+                raise ImportError("anthropic이 필요합니다: uv pip install -e '.[ai]'")
+            if api_key is None:
+                from quantpilot.config import settings
+
+                api_key = settings.anthropic_api_key
+            if not api_key:
+                raise ValueError("QP_ANTHROPIC_API_KEY가 비어 있습니다")
+            client = anthropic.AsyncAnthropic(api_key=api_key, timeout=30.0, max_retries=0)
+        self._client = client
+
+    def __repr__(self) -> str:
+        return f"ClaudeAnswerer(model={self.model!r})"
+
+    async def answer(self, question: str, context: dict[str, Any]) -> tuple[str, float]:
+        """질문 1건에 답하고 (답변, 비용USD)를 돌려준다."""
+        resp = await self._client.messages.create(
+            model=self.model,
+            max_tokens=self.max_tokens,
+            thinking={"type": "disabled"},
+            system=ASK_SYSTEM,
+            messages=[
+                {
+                    "role": "user",
+                    "content": "근거:\n"
+                    + json.dumps(context, ensure_ascii=False, default=str)
+                    + f"\n\n질문: {question}",
+                }
+            ],
+        )
+        usage = getattr(resp, "usage", None)
+        cost = cost_usd(
+            self.model,
+            int(getattr(usage, "input_tokens", 0) or 0),
+            int(getattr(usage, "output_tokens", 0) or 0),
+        )
+        text = next((b.text for b in resp.content if getattr(b, "type", "") == "text"), "")
+        return text, cost

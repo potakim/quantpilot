@@ -28,6 +28,7 @@ from quantpilot.db.models import (
     EquitySnapshotRow,
     FillRow,
     JudgmentRow,
+    LlmVerdictRow,
     OrderRow,
     PositionRow,
     RiskEventRow,
@@ -191,6 +192,26 @@ class SqlJudgmentRepo:
             s.add(row)
             await s.flush()
             return row.id
+
+    async def add_verdicts(self, judgment_id: int, verdicts: list[Any]) -> int:
+        """LLM 합의 결과(LLMVerdict 목록)를 llm_verdicts에 쓴다. 쓴 행 수."""
+        rows = [
+            LlmVerdictRow(
+                judgment_id=judgment_id,
+                model=str(v.model),
+                approve=bool(v.approve),
+                reason=str(v.reason),
+                latency_ms=getattr(v, "latency_ms", None),
+                cost_usd=getattr(v, "cost_usd", None),
+                prompt_hash=getattr(v, "prompt_hash", "") or None,
+            )
+            for v in verdicts
+        ]
+        if not rows:
+            return 0
+        async with self._sessions.begin() as s:
+            s.add_all(rows)
+        return len(rows)
 
     async def set_realized(self, judgment_id: int, ret_24h: float, direction_hit: bool) -> None:
         """24시간 뒤 실현 수익률과 방향 적중 여부를 채운다."""
@@ -360,6 +381,14 @@ class SqlConfigRepo:
             row.enabled, row.paper = enabled, paper
             await s.flush()
             return row.id
+
+    async def strategy_id(self, name: str, market: Market) -> int | None:
+        """(name, market) 전략 설정의 id. 없으면 None."""
+        q = select(StrategyConfigRow.id).where(
+            StrategyConfigRow.name == name, StrategyConfigRow.market == Market(market).value
+        )
+        async with self._sessions() as s:
+            return await s.scalar(q)
 
     async def strategies(self, market: Market | None = None) -> list[dict[str, Any]]:
         """전략 설정 목록."""

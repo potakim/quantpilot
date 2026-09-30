@@ -2,7 +2,8 @@
 
 체결(WS) → on_stop_check(손절) → CandleAggregator → 봉 확정 → CandleStore 저장 → TickRunner.on_bars_closed.
 EngineLink가 있으면 타이머가 link_every초마다 하트비트를 쓰고, scheduler가 넣은 시간 청산 명령을
-TickRunner.on_time_exit로 실행한 뒤 ack한다 (04 §8).
+TickRunner.on_time_exit로 실행한 뒤 ack한다 (04 §8). 수동 주문 큐(ManualOrderConsumer, ADR 0017)도
+같은 타이머에서 비운다. 이벤트는 HubBus로 허브(Redis pub/sub) → api WS 허브 → 화면에 간다 (P1-12).
 
 같은 구간의 봉은 심볼마다 확정 시점이 다르다(다음 체결이 먼저 오면 즉시, 아니면 마감 + grace 타이머).
 여러 심볼을 보는 전략이 한 시각에 한 번만 평가되도록, 확정된 봉은 그 구간의 마감 + grace까지 모았다가
@@ -27,7 +28,9 @@ from quantpilot.data.store import CandleStore
 from quantpilot.engine.tick import TickRunner
 
 if TYPE_CHECKING:
+    from quantpilot.core.ports import Hub
     from quantpilot.db.repo import Sessions
+    from quantpilot.engine.orders import ManualOrderConsumer
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +47,7 @@ class MarketEngine:
         store: CandleStore | None = None,
         link: EngineLink | None = None,
         link_every: float = 5.0,
+        orders: ManualOrderConsumer | None = None,
     ):
         self.runner = runner
         self.aggregator = aggregator
@@ -51,12 +55,16 @@ class MarketEngine:
         self.store = store
         self.link = link
         self.link_every = link_every
+        self.orders = orders
         self._closed: list[BarClosed] = []
         self._last_link: datetime | None = None
 
     async def on_trade(self, ev: TradeEvent) -> None:
         """체결 1건: 손절 검사(판단 모델 없음) 후 봉 집계."""
         await self.runner.on_stop_check(ev)
+        bus = getattr(self.runner, "bus", None)
+        if bus is not None:
+            await bus.publish("trade", ev)  # 화면 시세 (HubBus가 초당 4건으로 줄인다)
         bar = self.aggregator.on_trade(ev)
         if bar is not None:
             self._closed.append(bar)
@@ -65,6 +73,8 @@ class MarketEngine:
         """마감 + grace가 지난 구간의 봉을 시각별 묶음으로 넘긴다. 넘긴 봉 수를 돌려준다."""
         now = self.clock.now()
         await self.on_link(now)
+        if self.orders is not None:
+            await self.orders.drain()
         self._closed += self.aggregator.on_timer(now)
         span, grace = self.aggregator.span, self.aggregator.grace
         due = [b for b in self._closed if now >= b.ts + span + grace]
@@ -126,7 +136,10 @@ class MarketEngine:
 
 
 def build_upbit_paper(
-    strategy_names: Sequence[str] = ("vol_breakout",), *, sessions: Sessions | None = None
+    strategy_names: Sequence[str] = ("vol_breakout",),
+    *,
+    sessions: Sessions | None = None,
+    hub: Hub | None = None,
 ) -> MarketEngine:
     """업비트 페이퍼 엔진 배선. 판단 파이프라인은 settings.judge_provider로 고른다 (stub이면 게이팅 OFF).
 
@@ -134,6 +147,7 @@ def build_upbit_paper(
 
     sessions가 있으면 계좌를 DB에 저장하는 PersistentPaperBroker + OrderExecutor(원장 기록)를 쓰고,
     scheduler와 settings 우편함(SettingsEngineLink)으로 연결한다. 시작 전에 `restore()`를 불러야 한다.
+    hub가 있으면 이벤트를 HubBus로 발행(sessions가 있으면 DB 기록 포함)하고 수동 주문 큐를 소비한다.
     """
     from quantpilot.backtest.costs import preset
     from quantpilot.config import settings
@@ -193,7 +207,12 @@ def build_upbit_paper(
             shadow_broker, RiskManager(), SqlLedger(sessions, shadow=True), NoLimiter()
         )
         link = SettingsEngineLink(config)
-    bus = _LogBus()
+    bus: object = _LogBus()
+    if hub is not None:
+        from quantpilot.realtime.bus import EventRecorder, HubBus
+
+        recorder = EventRecorder.from_sessions(sessions) if sessions is not None else None
+        bus = HubBus(hub, market, recorder=recorder)
     runner = TickRunner(
         market,
         strategies,
@@ -206,11 +225,16 @@ def build_upbit_paper(
         cost=cost,
         shadow=shadow,
     )
-    return MarketEngine(runner, CandleAggregator("1m", market), clock, link=link)
+    orders = None
+    if hub is not None:
+        from quantpilot.engine.orders import ManualOrderConsumer
+
+        orders = ManualOrderConsumer(hub, runner)
+    return MarketEngine(runner, CandleAggregator("1m", market), clock, link=link, orders=orders)
 
 
 class _LogBus:
-    """Redis 허브(P1-12) 전까지 이벤트를 로그로만 남긴다."""
+    """허브 없이 돌릴 때(테스트·단독 실행) 이벤트를 로그로만 남긴다."""
 
     async def publish(self, topic: str, event: object) -> None:
         """이벤트 1건을 debug 로그로."""
@@ -223,10 +247,11 @@ def main() -> None:
     from quantpilot.data.upbit_ws import UpbitStream
     from quantpilot.db.session import make_sessions
     from quantpilot.notify.telegram import CriticalLogHandler, from_settings
+    from quantpilot.realtime.hub import make_hub
 
     logging.basicConfig(level=logging.INFO)
     logging.getLogger().addHandler(CriticalLogHandler(from_settings(settings)))  # 청산 실패 등
-    engine = build_upbit_paper(sessions=make_sessions(settings.db_url))
+    engine = build_upbit_paper(sessions=make_sessions(settings.db_url), hub=make_hub(settings))
     symbols = sorted({s for st in engine.runner.strategies for s in st.symbols})
     stream = UpbitStream(symbols, on_trade=engine.on_trade)
 

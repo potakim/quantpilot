@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 import numpy as np
@@ -234,6 +234,8 @@ class TickRunner:
                 symbol=t.symbol, strategy=s.name, target=t, ctx=c.ctx
             )
             je = await self.pipeline.evaluate(signal, state)
+            if je.state is None:
+                je = replace(je, state=state)  # judgments.state 기록용 (P1-12 EventRecorder)
             await self.bus.publish("judgment", je)
             mult = je.size_multiplier
         for b, equity in books:

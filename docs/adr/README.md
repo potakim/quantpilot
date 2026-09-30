@@ -19,3 +19,4 @@
 | 0013 | engine ↔ scheduler 연결: settings 우편함·하트비트·백업 시간 청산 | 승인 |
 | 0014 | LLM 리뷰어·JudgmentPipeline 계약: Claude 샘플링 인자 없음·실패는 hold·prompt_hash 저장 위치 | 승인 |
 | 0015 | Reconciler 할트 전달(settings 우편함)·브로커 기준 해제·critical 5분 반복 알림 | 승인 |
+| 0017 | API v1: 수동 주문은 허브 큐로 엔진에, 실시간 허브(Redis/Memory)·HubBus 기록, 표준 라이브러리 JWT | 승인 |

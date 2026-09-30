@@ -9,7 +9,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="QP_", extra="ignore")
+    # data/keys.env는 POST /settings/keys가 쓰는 파일 — 재시작 뒤 환경변수처럼 읽힌다 (ADR 0017 §4)
+    model_config = SettingsConfigDict(
+        env_file=(".env", "data/keys.env"), env_prefix="QP_", extra="ignore"
+    )
 
     env: str = "dev"
     data_dir: Path = Path("data")
@@ -19,6 +22,15 @@ class Settings(BaseSettings):
 
     # 저장소 (02 문서). 비어 있으면 data_dir 아래 SQLite 파일을 쓴다.
     database_url: str = ""
+
+    # 실시간 허브 (02 §2). 비어 있으면 프로세스 내 MemoryHub (ADR 0017)
+    redis_url: str = ""
+
+    # API 인증 (03 §1, 07 §2). 값은 응답·로그에 절대 나오지 않는다 (불변식 #10)
+    admin_password: str = ""
+    jwt_secret: str = ""  # 32바이트 이상
+    jwt_ttl_hours: int = 12
+    keys_file: Path = Path("data/keys.env")
 
     # 판단 계층
     judge_provider: str = "stub"  # stub | typesafe | laya

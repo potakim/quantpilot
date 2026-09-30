@@ -65,7 +65,7 @@ FastAPI, base `/api/v1`. 인증은 `Authorization: Bearer <JWT>` (단일 사용�
 | GET | `/positions?market=` | 포지션 목록 + 전략·손절가·미실현 |
 | GET | `/orders?market=&status=&limit=` | 주문 목록 |
 | GET | `/fills?market=&strategy=&from=&to=` | 원장 |
-| POST | `/orders` | 수동 주문 `{market, symbol, side, qty|amount, type, limit_price?, stop?}` → RiskManager 통과 시 201 `{order, risk}`, 거부 시 422. **수동 주문도 리스크 게이트를 탄다** |
+| POST | `/orders` | 수동 주문 `{market, symbol, side, qty|amount, type, limit_price?, stop?}` → RiskManager 통과 시 201 `{order(status=queued), risk}`, 거부 시 422(할트 중 409 `HALTED`). **수동 주문도 리스크 게이트를 탄다** — api는 사전 검사 후 주문 큐에 넣고 엔진이 OrderExecutor로 다시 검사·실행한다 (ADR 0017) |
 | DELETE | `/orders/{id}` | 미체결 취소 |
 | POST | `/positions/{market}/{symbol}/close` | 시장가 청산 (리스크 게이트의 exit 경로) |
 | GET | `/quotes/{market}/{symbol}` | 현재가·호가 5단계·전략 상태(목표가, 이평 스코어) |
@@ -90,8 +90,9 @@ FastAPI, base `/api/v1`. 인증은 `Authorization: Bearer <JWT>` (단일 사용�
 | GET | `/reports/gates` | 관문 G1~G4 현재 상태 `{g1:{pass, evidence}, g2:{pass, mdd_on, mdd_off, brier, days:18/28}, ...}` |
 | GET | `/risk/events?limit=` | 리스크 이벤트 |
 | GET | `/costs/ai?month=` | AI 비용 집계 (provider별 호출 수·USD) |
+| POST | `/reconcile/{market}/accept-broker` | "브로커 기준으로 맞추기" `{confirm_password}` → Reconciler.accept_broker (정합 이벤트 해결·할트 해제, ADR 0015·0017). 할트를 푸는 유일한 API |
 
-## 3. WebSocket `/ws`
+## 3. WebSocket `/ws` (`/api/v1/ws`)
 
 연결 시 `{"auth": "<JWT>", "subscribe": ["ticks:upbit:KRW-ETH", "fills", "judgments", "risk", "portfolio", "backtest:<id>"]}`.
 서버 → 클라이언트 메시지는 `{"ch": "...", "ts": "...", "data": {...}}`.

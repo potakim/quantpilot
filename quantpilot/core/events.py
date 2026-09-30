@@ -59,6 +59,7 @@ class JudgmentEvent:
     ts: datetime
     blocks: tuple[str, ...] = ()
     verdicts: tuple[Any, ...] = ()  # judgment.base.LLMVerdict (LLM 합의를 거친 경우만)
+    state: Any = None  # 판단 입력(judgment.base.State). TickRunner가 채워 judgments.state에 남긴다
 
 
 @dataclass(frozen=True)

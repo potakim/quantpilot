@@ -171,7 +171,17 @@ engine ↔ scheduler는 P1-12 Redis 전까지 DB `settings` 우편함(`engine/li
 
 ## 10. api
 
-0단계 `app.py`를 `api/routes/{system,strategies,backtests,trading,judgments,reports}.py`로 분할. 상태는 전부 DB·Redis에서. 백테스트 실행은 `ThreadPoolExecutor(1)` + Redis 진행률. WS 허브는 Redis pub/sub 구독 → 클라이언트 팬아웃.
+0단계 `app.py`를 `api/routes/{system,strategies,backtests,trading,judgments,reports}.py`로 분할했다(P1-12, ADR 0017). `app.py::create_app(settings, sessions, hub, calibration, answerer, account_source, ...)`가 부품을 주입받고, 모듈의 `app`은 설정대로 만든다. 상태는 전부 DB·허브에서 읽는다.
+
+- `auth.py`: 표준 라이브러리 HS256 JWT(`QP_JWT_SECRET` 32바이트 이상, `QP_ADMIN_PASSWORD`). `/health`·`/auth/login`만 인증 없음.
+- `errors.py`: `{"error": {code, message, detail}}`. 검증 실패는 400 `INVALID_PARAM`.
+- `deps.py`: `Deps`, `CalibrationSource`(t13이 구현), `Answerer`(`StubAnswerer`, `judgment/anthropic.py::ClaudeAnswerer`).
+- `queries.py`(목록·상세 조회, `limit`·`before` 페이지네이션), `gates.py`(G1~G4 근거 모음).
+- 수동 주문·청산·취소: RiskManager 사전 검사 → `q:orders:<market>` → 엔진 `engine/orders.py::ManualOrderConsumer`가 `OrderExecutor`로 실행.
+- 백테스트: `ThreadPoolExecutor(1)`, 진행률은 허브 키 `bt:<id>` + WS `backtest:<id>`. 결과 곡선·체결은 `data_dir/backtests/<id>.json`.
+- `ws.py`: `/api/v1/ws`. `WsHub`가 허브를 한 번 구독하고 연결별 채널로 팬아웃. 첫 메시지 인증 실패 4401, 무응답 30초 4408.
+
+`realtime/`: `hub.py`(`MemoryHub`·`RedisHub`·`make_hub`), `bus.py`(`HubBus` — 엔진 EventBus → 허브 채널, `EventRecorder` — signals·judgments·llm_verdicts·risk_events 기록), `keys.py`(02 §2 키·채널 이름).
 
 ## 11. notify (1단계 신규)
 

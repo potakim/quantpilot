@@ -30,8 +30,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # setup-uv는 주 버전 태그(v10)를 두지 않는다 — 전체 버전으로 고정
       - name: Install uv
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: "3.11"
 

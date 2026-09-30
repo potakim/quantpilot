@@ -14,6 +14,8 @@ dependencies = [
     "pyarrow>=16",
     "httpx>=0.27",
     "python-dotenv>=1.0",
+    # 판단 모델 질문 문구 judgment/questions/*.yaml (P1-07)
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

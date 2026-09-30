@@ -47,11 +47,13 @@ class FeatureBuilder:  # features/builder.py — core.ports.FeatureBuilder Proto
 
 ## 4. judgment
 
-0단계 인터페이스 유지. 1단계 구현체:
+0단계 인터페이스 유지. `JudgeProvider`에 비동기 `ajudge()`가 추가됐다(기본 구현은 `judge()` 호출, ADR 0012). 1단계 구현체:
 
 | 파일 | 클래스 | 비고 |
 | --- | --- | --- |
-| `typesafe.py` | `TypeSafeJudge(api_key, model="jev-latest", timeout=3.0)` | `POST https://api.typesafe.ai/v1/systemone`. 원자 질문 6개를 한 요청에. 응답의 `confidence`는 질문별 최솟값을 `JudgeResult.confidence`로 (보수적) |
+| `typesafe.py` | `TypeSafeJudge(api_key, model="jev-latest", timeout=3.0, *, base_url, questions_version="v1")` | `POST https://api.typesafe.ai/v1/systemone`. 원자 질문 6개를 한 요청에. 응답의 `confidence`는 질문별 최솟값을 `JudgeResult.confidence`로 (보수적). score(0..N-1 단계)는 `/(N-1)`로 0~1. `ajudge()`는 총 3초 초과 → `JudgeTimeout`, HTTP·계약 위반 → `JudgeError` (ADR 0012). 키는 `from_settings()`로 `QP_TYPESAFE_API_KEY`에서 |
+| `questions/` | `load_questions("v1") -> QuestionSet` | `v1.yaml`의 `instructions`·`criteria`와 `prompt_hash`. 키·종류·옵션은 `base.py::DEFAULT_QUESTIONS`와 같아야 함 |
+| `pricing.py` | `cost_usd(model, input_tokens, output_tokens)`, `price_for(model)` | USD/100만 토큰 단가표. 모델명 최장 접두사로 찾고, 없으면 `ValueError` |
 | `laya.py` | `LayaJudge(base_url)` | 자체 호스팅 HTTP. 같은 스키마 |
 | `anthropic.py` | `ClaudeReviewer(model="claude-sonnet-5")` | `review()` + `daily_review()` + `answer_question()` |
 | `google.py` | `GeminiReviewer(model="gemini-3.5-flash")`, `GeminiSummarizer(model="gemini-3.5-flash-lite")` | 리뷰 / 뉴스 요약 |
@@ -66,7 +68,7 @@ LLM 프롬프트 계약은 06 문서. 모든 프로바이더는 `cost_usd`를 �
 
 | 파일 | 클래스 | 라이브러리 | 특이사항 |
 | --- | --- | --- | --- |
-| `paper.py` | `PaperBroker` | — | 0단계 완료. 1단계: 포지션·원장을 DB에 쓰는 `PersistentPaperBroker`로 확장 |
+| `paper.py` | `PaperBroker` | — | 0단계 완료. 1단계: 포지션·현금을 DB에 저장·복원하는 `PersistentPaperBroker`(`persistent_paper.py`, `restore()`·`persist()`). 주문·체결 원장은 `OrderExecutor`가 쓴다 (ADR 0011) |
 | `upbit.py` | `UpbitBroker` | pyupbit 또는 직접 REST(JWT HS512) | 주문 12/s, 조회 30/s. `order-test`로 사전 검증. 체결 확인은 `/v1/order` 폴링 0.5s |
 | `kis.py` | `KISBroker(paper: bool)` | python-kis | 토큰 24h(`TokenManager`), 실전 20건/s·모의 2건/s, 체결통보 WS. 국내·해외 같은 클래스, 시장 파라미터 |
 | `alpaca.py` | `AlpacaPaperBroker` | alpaca-py | 페이퍼 전용. 200 req/min |
@@ -75,6 +77,7 @@ LLM 프롬프트 계약은 06 문서. 모든 프로바이더는 `cost_usd`를 �
 
 - `submit()`은 **동기적으로 거래소 접수까지**만 보장하고 `Order(status=pending)`를 돌려줄 수 있다. 체결은 `OrderExecutor`가 확인한다.
 - 예외는 `BrokerError(retryable)`로 통일. HTTP 429 → `RateLimited`, 5xx·타임아웃 → retryable, 4xx(잔고 부족·잘못된 수량) → non-retryable.
+- `order_status(order_id)`는 체결이면 `Fill`, 대기·취소면 `Order`, 모르면 `None`(기본). `None`이면 `OrderExecutor`가 체결 확인 루프를 돌지 않는다 (ADR 0011).
 - `positions()`·`cash()`는 거래소 조회(캐시 2초). `Reconciler`가 DB 포지션과 대조한다.
 - 수량·가격은 거래소 호가 단위·최소 주문 금액에 맞게 어댑터가 반올림하고, 반올림 결과 0이면 `qty<=0`로 거부.
 
@@ -82,17 +85,21 @@ LLM 프롬프트 계약은 06 문서. 모든 프로바이더는 `cost_usd`를 �
 
 ```python
 class OrderExecutor:
-    def __init__(self, broker, risk: RiskManager, ledger: Ledger, limiter: RateLimiter)
-    async def execute(self, order: Order, *, equity, price, positions, horizon, intraday_exposure) -> ExecResult
+    def __init__(self, broker, risk: RiskGate, ledger: Ledger, limiter: RateLimiter, *,
+                 signals: SignalRepo | None = None, group: str | None = None,
+                 confirm_timeout=30.0, limit_ttl=60.0, poll_interval=0.5)
+    async def execute(self, order: Order, *, equity, price, positions, horizon, intraday_exposure) -> Fill | Order
 ```
 
 1. `risk.check()` → 거부면 `signals.outcome = risk_rejected` 기록 후 반환.
-2. `limiter.acquire(group)` (Redis 슬라이딩 윈도, 거래소별 한도의 80%).
-3. `broker.submit()` — retryable 오류는 지수 백오프 3회(0.5·1·2초). 3회 실패 → `risk.api_error()`.
-4. pending이면 체결 확인 루프(폴링 또는 WS 통보) 최대 30초. 시장가 미체결이면 취소 후 1회 재주문. 지정가는 전략의 `ttl`(기본 60초)까지 대기 후 취소.
-5. Fill 확정 → `ledger.record(fill, signal, judgment)` → `positions` 갱신 → `ch:fills` 발행.
+2. `limiter.acquire(group)` (슬라이딩 윈도, 거래소별 한도의 80%. 기본 인메모리, 여러 프로세스면 Redis. 페이퍼는 `group=None`).
+3. `broker.submit()` — retryable 오류는 첫 시도 + 재시도 3회(0.5·1·2초 지수 백오프, 429의 `retry_after`가 더 길면 그만큼). 모두 실패 → `risk.api_error()`. non-retryable은 재시도 없이 거부.
+4. pending이면 `broker.order_status` 폴링(0.5초) 최대 30초. 시장가 미체결이면 취소 후 새 주문 id로 1회 재주문. 지정가는 `limit_ttl`(기본 60초)까지 대기 후 취소.
+5. Fill 확정 → `ledger.save_order`(filled) → `ledger.record(fill)` → 브로커 `persist()`(있으면, 페이퍼 계좌 상태) → `signals.outcome = filled`. `fill` 이벤트 발행은 `TickRunner` 몫. 원장 쓰기 실패는 CRITICAL 로그만 남기고 결과를 바꾸지 않는다.
 
-청산 주문(`signals.kind = exit`인 주문)은 1·2를 건너뛰지 않되(`risk.check`가 exit는 항상 허용), 재시도 횟수를 10회로 늘리고 실패 시 알림을 `critical`로 보낸다.
+반환은 `Fill | Order`다(`core/ports.py`의 Protocol, ADR 0011). `TickRunner`에 `DirectExecutor` 대신 그대로 꽂는다.
+
+청산 주문(보유 포지션을 줄이는 매도)은 1·2를 건너뛰지 않되(`risk.check`가 exit는 항상 허용), 재시도 횟수를 10회(대기 상한 4초)로 늘리고 실패 시 `CRITICAL` 로그를 남긴다(텔레그램 알림은 P1-10).
 
 ### 5.3 RiskManager (0단계 완료)
 

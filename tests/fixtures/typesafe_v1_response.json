@@ -1,0 +1,77 @@
+{
+  "model": "jev-1.13.0",
+  "answers": {
+    "regime": {
+      "type": "choice",
+      "choice": "trend_up",
+      "confidence": 0.81,
+      "probabilities": {"trend_up": 0.72, "range": 0.21, "trend_down": 0.07}
+    },
+    "news_risk": {
+      "type": "score",
+      "score": 0.48,
+      "confidence": 0.74,
+      "legend": {
+        "0": "No relevant negative news",
+        "1": "Minor negative news with little expected impact",
+        "2": "Mixed or uncertain news that could move the price against the position",
+        "3": "Clearly negative news likely to push the price down",
+        "4": "Severe negative news (hack, delisting, legal action, regulatory ban)"
+      },
+      "probabilities": {"0": 0.6, "1": 0.32, "2": 0.08, "3": 0.0, "4": 0.0}
+    },
+    "liquidity_stress": {
+      "type": "score",
+      "score": 0.4,
+      "confidence": 0.88,
+      "legend": {
+        "0": "Normal liquidity, tight spread",
+        "1": "Slightly thinner than usual",
+        "2": "Noticeably thin order book or widening spread",
+        "3": "Stressed liquidity; large orders would move the price",
+        "4": "Disorderly market; liquidity has largely disappeared"
+      },
+      "probabilities": {"0": 0.65, "1": 0.3, "2": 0.05, "3": 0.0, "4": 0.0}
+    },
+    "event_ahead": {
+      "type": "score",
+      "score": 0.2,
+      "confidence": 0.92,
+      "legend": {
+        "0": "No known event",
+        "1": "Minor event with little expected impact",
+        "2": "Possible event of moderate importance",
+        "3": "Likely important event (macro release, earnings, listing review)",
+        "4": "Confirmed major event (hard fork, delisting decision, central bank decision)"
+      },
+      "probabilities": {"0": 0.82, "1": 0.16, "2": 0.02, "3": 0.0, "4": 0.0}
+    },
+    "already_priced": {
+      "type": "score",
+      "score": 1.25,
+      "confidence": 0.55,
+      "legend": {
+        "0": "Not reflected at all",
+        "1": "Slightly reflected",
+        "2": "Partly reflected",
+        "3": "Mostly reflected",
+        "4": "Fully reflected"
+      },
+      "probabilities": {"0": 0.2, "1": 0.45, "2": 0.25, "3": 0.1, "4": 0.0}
+    },
+    "signal_quality": {
+      "type": "score",
+      "score": 2.8,
+      "confidence": 0.63,
+      "legend": {
+        "0": "Very poor; conditions contradict the signal",
+        "1": "Poor",
+        "2": "Average",
+        "3": "Good",
+        "4": "Very good; trend, volume and context all agree"
+      },
+      "probabilities": {"0": 0.0, "1": 0.1, "2": 0.2, "3": 0.5, "4": 0.2}
+    }
+  },
+  "usage": {"input_tokens": 392, "output_tokens": 65}
+}

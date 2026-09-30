@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import time
 
+from quantpilot.core.errors import JudgeError
 from quantpilot.core.events import JudgmentEvent, SignalEvent
 from quantpilot.core.models import JudgeResult
 from quantpilot.judgment.base import (
@@ -92,6 +93,7 @@ class StubPipeline:
     진입 신호마다 판단 모델을 실제로 호출해 판단 이벤트를 남긴다. gating=False(기본)면 결과와 무관하게
     size_multiplier=1.0 — 게이팅 A/B의 OFF 기준선이자 0단계 백테스트 수치 유지용 (ADR 0010).
     gating=True면 hard_blocks·확신도 게이트(decide)를 그대로 적용한다. LLM 합의는 P1-08 몫.
+    판단 모델 타임아웃·오류(JudgeError)는 확신도 0으로 기록해 hold가 된다 (06 §7, ADR 0012).
     """
 
     def __init__(self, judge: JudgeProvider | None = None, *, gating: bool = False):
@@ -100,7 +102,10 @@ class StubPipeline:
 
     async def evaluate(self, signal: SignalEvent, state: State) -> JudgmentEvent:
         """판단 1회. 수량·가격은 정하지 않고 사이징 배수만 돌려준다."""
-        jr = self.judge.judge(state)
+        try:
+            jr = await self.judge.ajudge(state)
+        except JudgeError as e:
+            jr = JudgeResult({}, 0.0, model=self.judge.name, raw={"error": type(e).__name__})
         d = decide(jr, [])
         mult = d.size_multiplier if self.gating else 1.0
         return JudgmentEvent(signal.signal_id or 0, jr, d.gate, mult, signal.ts, tuple(d.blocks))

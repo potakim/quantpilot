@@ -1,0 +1,58 @@
+# 판단 모델 원자 질문 v1 (06 §2). 키·종류·옵션은 judgment/base.py::DEFAULT_QUESTIONS와 같아야 한다(테스트가 확인).
+# 문구를 바꾸면 이 파일을 고치지 말고 v2.yaml을 새로 만든다 — prompt_hash가 판단 로그에 남고, 4주 병행 기록 후 교체.
+# 모델에 보내는 문구는 영어로 둔다 (TypeSafe 문서·예제가 영어 기준). 수량·가격·손절은 묻지 않는다 (불변식 #7).
+# score 질문의 criteria는 낮은 단계 → 높은 단계 순서. 응답 score(0..N-1)를 코드가 N-1로 나눠 0~1로 바꾼다 (ADR 0012).
+version: v1
+questions:
+  regime:
+    type: choice
+    instructions: Which market regime best describes this asset right now?
+    criteria:
+      trend_up: Sustained upward trend; higher highs and higher lows
+      range: Sideways, mean-reverting movement without a clear direction
+      trend_down: Sustained downward trend; lower highs and lower lows
+  news_risk:
+    type: score
+    instructions: How likely is the news in the last 24 hours to hurt a new long position?
+    criteria:
+      - No relevant negative news
+      - Minor negative news with little expected impact
+      - Mixed or uncertain news that could move the price against the position
+      - Clearly negative news likely to push the price down
+      - Severe negative news (hack, delisting, legal action, regulatory ban)
+  liquidity_stress:
+    type: score
+    instructions: How stressed is liquidity for this asset right now?
+    criteria:
+      - Normal liquidity, tight spread
+      - Slightly thinner than usual
+      - Noticeably thin order book or widening spread
+      - Stressed liquidity; large orders would move the price
+      - Disorderly market; liquidity has largely disappeared
+  event_ahead:
+    type: score
+    instructions: How likely is a major scheduled or pending event within the next 24 hours?
+    criteria:
+      - No known event
+      - Minor event with little expected impact
+      - Possible event of moderate importance
+      - Likely important event (macro release, earnings, listing review)
+      - Confirmed major event (hard fork, delisting decision, central bank decision)
+  already_priced:
+    type: score
+    instructions: How much of the recent news is already reflected in the price?
+    criteria:
+      - Not reflected at all
+      - Slightly reflected
+      - Partly reflected
+      - Mostly reflected
+      - Fully reflected
+  signal_quality:
+    type: score
+    instructions: Given the state, how good is this rule-based entry candidate?
+    criteria:
+      - Very poor; conditions contradict the signal
+      - Poor
+      - Average
+      - Good
+      - Very good; trend, volume and context all agree

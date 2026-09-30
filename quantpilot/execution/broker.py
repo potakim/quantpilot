@@ -21,6 +21,10 @@ class BrokerAdapter(ABC):
     @abstractmethod
     def cancel(self, order_id: str) -> bool: ...
 
+    def order_status(self, order_id: str) -> Fill | Order | None:
+        """제출한 주문의 현재 상태. 체결이면 Fill, 대기·취소면 Order, 모르면 None (ADR 0011 §4)."""
+        return None
+
     @abstractmethod
     def positions(self) -> Mapping[str, Position]: ...
 

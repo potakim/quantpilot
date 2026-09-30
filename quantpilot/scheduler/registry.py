@@ -70,11 +70,13 @@ JOBS: tuple[JobSpec, ...] = (
     JobSpec("daily_review", "cron", {"hour": 20, "minute": 30, "timezone": KST},
             data.daily_review, "사후 리뷰 → daily_reviews"),
     JobSpec("equity_snapshot", "interval", {"seconds": 60}, health.equity_snapshot, "equity_snapshots"),
-    JobSpec("reconcile", "interval", {"seconds": 300}, _hook("reconcile"), "Reconciler (P1-10 이후)"),
+    JobSpec("reconcile", "interval", {"seconds": 300}, health.reconcile, "Reconciler: 불일치면 할트"),
     JobSpec("month_roll", "cron", {"day": 1, "hour": 0, "minute": 0, "timezone": UTC},
             health.month_roll, "month_start_equity 저장"),
     JobSpec("engine_heartbeat", "interval", {"seconds": 30}, health.engine_heartbeat,
             "하트비트 90초 없으면 알림 + 시간 청산 백업 모드"),
+    JobSpec("alert_repeat", "interval", {"seconds": 60}, health.alert_repeat,
+            "미해결 critical 5분 반복 (07 §6)"),
 )  # fmt: skip
 
 SPECS: dict[str, JobSpec] = {s.name: s for s in JOBS}

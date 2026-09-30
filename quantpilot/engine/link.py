@@ -5,6 +5,8 @@ engine과 scheduler는 다른 프로세스다. Redis 허브(P1-12) 전까지 둘
 - `engine.heartbeat.<market>` = 마지막 하트비트(UTC ISO). engine이 몇 초마다 쓴다.
 - `engine.cmd.<market>.time_exit.<strategy>` = {"id", "ts"}. scheduler가 시간 청산을 요청한다.
 - `engine.ack.<market>.time_exit.<strategy>` = 처리한 명령 id. 명령 키와 다르면 대기 중.
+- `engine.halt.<market>` = {"reason", "ts", ...}. Reconciler가 걸고, 사람 조작만 지운다(ADR 0015).
+  엔진은 하트비트 때마다 읽어서 RiskManager.halted_reason에 반영한다.
 
 전략마다 키가 따로라서 한 키를 두 프로세스가 동시에 고치지 않는다(명령은 scheduler만, ack는 처리한 쪽만).
 """
@@ -13,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from quantpilot.core.models import Market
@@ -66,3 +69,23 @@ class SettingsEngineLink:
     async def ack_time_exit(self, market: Market, strategy: str, cmd_id: str) -> None:
         """명령을 처리했다고 기록한다."""
         await self.config.set_setting(self._key("ack", market, strategy), cmd_id)
+
+    @staticmethod
+    def _halt_key(market: Market) -> str:
+        return f"engine.halt.{Market(market).value}"
+
+    async def halt(self, market: Market, reason: str, detail: dict[str, Any] | None = None) -> None:
+        """엔진에 할트를 건다. 이미 걸려 있으면 처음 기록을 둔다."""
+        if await self.halt_reason(market):
+            return
+        value = {"reason": reason, "ts": self.utcnow().isoformat(), **(detail or {})}
+        await self.config.set_setting(self._halt_key(market), value)
+
+    async def halt_reason(self, market: Market) -> str | None:
+        """걸려 있는 할트 사유. 없으면 None."""
+        raw = await self.config.get_setting(self._halt_key(market))
+        return raw.get("reason") if raw else None
+
+    async def clear_halt(self, market: Market) -> None:
+        """할트를 푼다 (사람 조작 경로에서만)."""
+        await self.config.set_setting(self._halt_key(market), None)

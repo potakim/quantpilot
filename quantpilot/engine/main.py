@@ -92,6 +92,7 @@ class MarketEngine:
         self._last_link = now
         market = self.runner.market
         await self.link.beat(market)
+        await self._sync_halt(market)
         for s in self.runner.strategies:
             cmd_id = await self.link.pending_time_exit(market, s.name)
             if cmd_id is None:
@@ -99,6 +100,17 @@ class MarketEngine:
             log.info("time_exit 명령 처리", extra={"strategy": s.name, "cmd": cmd_id})
             await self.runner.on_time_exit(s.name)
             await self.link.ack_time_exit(market, s.name, cmd_id)
+
+    async def _sync_halt(self, market) -> None:
+        """scheduler(Reconciler)가 건 할트를 RiskManager에 반영한다. 풀리는 건 할트 키가 지워졌을 때만."""
+        reason = await self.link.halt_reason(market)
+        risk = self.runner.risk
+        if reason and not risk.halted_reason:
+            risk.halted_reason = reason
+            log.warning("halted by link", extra={"market": market.value, "reason": reason})
+        elif not reason and risk.halted_reason.startswith("reconcile"):
+            risk.halted_reason = ""
+            log.info("halt released", extra={"market": market.value})
 
     async def run(self, stream, *, interval: float = 1.0) -> None:
         """스트림(run()이 체결을 on_trade로 넘김)과 타이머를 함께 돌린다."""
@@ -190,8 +202,10 @@ def main() -> None:
     from quantpilot.config import settings
     from quantpilot.data.upbit_ws import UpbitStream
     from quantpilot.db.session import make_sessions
+    from quantpilot.notify.telegram import CriticalLogHandler, from_settings
 
     logging.basicConfig(level=logging.INFO)
+    logging.getLogger().addHandler(CriticalLogHandler(from_settings(settings)))  # 청산 실패 등
     engine = build_upbit_paper(sessions=make_sessions(settings.db_url))
     symbols = sorted({s for st in engine.runner.strategies for s in st.symbols})
     stream = UpbitStream(symbols, on_trade=engine.on_trade)

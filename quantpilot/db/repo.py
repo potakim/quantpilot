@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -30,6 +30,7 @@ from quantpilot.db.models import (
     JudgmentRow,
     OrderRow,
     PositionRow,
+    RiskEventRow,
     SettingRow,
     SignalRow,
     StrategyConfigRow,
@@ -244,6 +245,44 @@ class SqlPositionRepo:
         async with self._sessions() as s:
             rows = (await s.scalars(q.order_by(PositionRow.symbol, PositionRow.strategy))).all()
         return [row_to_position(r) for r in rows]
+
+
+class SqlRiskEventRepo:
+    """risk_events. 시장은 detail["market"]에 둔다 (표에 market 열이 없다)."""
+
+    def __init__(self, sessions: Sessions) -> None:
+        self._sessions = sessions
+
+    async def add(self, kind: str, detail: dict[str, Any], *, ts: datetime | None = None) -> int:
+        """이벤트 1건을 쓰고 id를 돌려준다."""
+        row = RiskEventRow(kind=kind, detail=detail)
+        if ts is not None:
+            row.ts = ts
+        async with self._sessions.begin() as s:
+            s.add(row)
+            await s.flush()
+            return row.id
+
+    async def open(self, kind: str, market: Market) -> dict[str, Any] | None:
+        """그 시장의 미해결 이벤트(가장 최근). 없으면 None."""
+        q = (
+            select(RiskEventRow)
+            .where(RiskEventRow.kind == kind, RiskEventRow.resolved_at.is_(None))
+            .order_by(RiskEventRow.id.desc())
+        )
+        m = Market(market).value
+        async with self._sessions() as s:
+            for row in (await s.scalars(q)).all():
+                if (row.detail or {}).get("market") == m:
+                    return _row_dict(row)
+        return None
+
+    async def resolve(self, event_id: int, *, ts: datetime | None = None) -> None:
+        """이벤트를 해결됨으로 표시한다."""
+        async with self._sessions.begin() as s:
+            row = await s.get(RiskEventRow, event_id)
+            if row is not None:
+                row.resolved_at = ts or datetime.now(UTC)
 
 
 class SqlConfigRepo:

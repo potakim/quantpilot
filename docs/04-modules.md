@@ -109,6 +109,8 @@ class OrderExecutor:
 
 엔진 시작 시와 매 5분: 브로커 `positions()`·`cash()`와 DB `positions`·`equity`를 대조. 수량 차이 > 최소 주문 단위면 `risk_events(reconcile_mismatch)` + 할트. 사람이 화면에서 "브로커 기준으로 맞추기"를 눌러야 해제.
 
+구현(`execution/reconciler.py`, ADR 0015): scheduler 시작 시와 `reconcile` 잡(5분)이 돈다. 심볼별 수량 차이가 최소 주문 단위(업비트 1e-8, KRX·미국 1주) **이상**이면 불일치로 보고, 미해결 이벤트가 없을 때만 `risk_events`에 기록한다. 이어서 settings 우편함의 `engine.halt.<market>` 할트 키를 쓰고 critical 알림을 보낸다. 엔진은 `on_link`에서 할트 키를 읽어 `RiskManager.halted_reason`에 반영한다. 해제 경로는 `Reconciler.accept_broker` 하나뿐이다: DB를 브로커 기준으로 덮어쓰고, 이벤트를 닫고, 할트 키를 지운다. 현금 차이는 warning만 보낸다.
+
 ## 6. data
 
 | 파일 | 내용 |
@@ -159,12 +161,13 @@ APScheduler(AsyncIOScheduler), 잡은 DB에 영속(`SQLAlchemyJobStore`).
 | `reconcile` | 5분 | Reconciler |
 | `month_roll` | 매월 1일 09:00 (UTC 00:00) | `month_start_equity` DB 저장 (롤 자체는 RiskManager) |
 | `engine_heartbeat` | 30초 | 엔진 하트비트 확인, 90초 없으면 알림 + 시간 청산 백업 모드 |
+| `alert_repeat` | 매분 | 미해결 critical 알림을 5분마다 재전송 (07 §6, ADR 0015) |
 
 engine ↔ scheduler는 P1-12 Redis 전까지 DB `settings` 우편함(`engine/link.py::SettingsEngineLink`)으로 하트비트와 시간 청산 명령을 주고받는다. 정상일 때는 엔진이 명령을 받아 `TickRunner.on_time_exit`를 부르고, 하트비트가 끊기면 scheduler가 DB 계좌로 만든 `TickRunner`의 `on_time_exit`를 직접 부른다(ADR 0013). 잡 표는 `scheduler/registry.py::JOBS`에 있다.
 
 ## 9. db
 
-`models.py`(SQLAlchemy), `mappers.py`(dataclass ↔ ORM), `repo.py`(`SqlCandleRepo`, `SqlLedger`, `SqlSignalRepo`, `SqlJudgmentRepo`, `SqlPositionRepo`, `SqlConfigRepo`), `migrations/`(alembic). 코어는 `core/repos.py`의 Protocol(`CandleRepo`, `Ledger`, `SignalRepo`, `JudgmentRepo`, `PositionRepo`, `ConfigRepo`)만 알고 구현은 주입 (ADR 0008).
+`models.py`(SQLAlchemy), `mappers.py`(dataclass ↔ ORM), `repo.py`(`SqlCandleRepo`, `SqlLedger`, `SqlSignalRepo`, `SqlJudgmentRepo`, `SqlPositionRepo`, `SqlRiskEventRepo`, `SqlConfigRepo`), `migrations/`(alembic). 코어는 `core/repos.py`의 Protocol(`CandleRepo`, `Ledger`, `SignalRepo`, `JudgmentRepo`, `PositionRepo`, `RiskEventRepo`, `ConfigRepo`)만 알고 구현은 주입 (ADR 0008).
 
 ## 10. api
 

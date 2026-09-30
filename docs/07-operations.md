@@ -16,6 +16,45 @@
 - Docker Compose. 이미지는 GitHub Actions에서 빌드해 GHCR로 push, VPS에서 `docker compose pull && up -d`.
 - 배포 순서: `api` → `scheduler` → `engine`. 엔진은 **포지션이 없는 시간대**(KST 09:05~15:15 사이는 KRX 보유 중일 수 있으니 피하고, 20:00~22:00 권장)에만 재시작. 배포 스크립트가 `positions` 비어 있는지 확인하고 아니면 `--force` 요구.
 - 롤백: 이전 이미지 태그로 `up -d`. DB 마이그레이션은 항상 하위 호환(컬럼 추가만, 삭제는 2배포 뒤).
+- 구성 파일: `deploy/compose.yml`(프로젝트 `qp-paper`), `scripts/deploy.sh`, `scripts/backup.sh`. 결정 배경은 ADR 0019.
+
+### 2.1 처음 설치 (VPS)
+
+```bash
+sudo mkdir -p /opt/quantpilot/backups && cd /opt/quantpilot
+git clone https://github.com/potakim/quantpilot.git app
+cp app/.env.example .env && chmod 600 .env       # 키·POSTGRES_PASSWORD 채우기
+echo "$GHCR_TOKEN" | docker login ghcr.io -u potakim --password-stdin   # 비공개 패키지면
+app/scripts/deploy.sh --dry-run                  # 실행할 명령만 확인
+app/scripts/deploy.sh                            # pull → db·redis → migrate → api → scheduler → engine
+curl -s 127.0.0.1:8000/api/v1/health             # ok·paper=true·engine_alive 확인
+```
+
+- `POSTGRES_PASSWORD`는 DB URL에 그대로 들어가므로 URL에 안전한 문자로 만든다(예: `openssl rand -hex 24`). `QP_JWT_SECRET`은 32바이트 이상.
+- compose가 `QP_PAPER=true`를 못박는다. env 파일 값으로 실전으로 바뀌지 않는다.
+- db·redis는 호스트 포트가 없고 api는 `127.0.0.1:8000`에만 열린다. 밖에서 볼 때는 `ssh -L 8000:127.0.0.1:8000 vps` 또는 HTTPS 앞단(후속 카드).
+- 업데이트: `app/scripts/deploy.sh --tag <커밋 sha>`(기본 `latest`). engine 재시작 전 가드가 열린 포지션·KRX 장중(평일 KST 09:05~15:15)을 확인하고, 걸리면 api·scheduler까지만 갱신한 뒤 멈춘다. 그래도 진행하려면 `--force`.
+- 이미지를 VPS에서 직접 만들 때는 `--build`.
+
+### 2.2 백업·복원
+
+- cron(KST 03:30): `30 3 * * * /opt/quantpilot/app/scripts/backup.sh --remote <rclone 대상> >> /opt/quantpilot/backup.log 2>&1` (VPS 시간대가 UTC면 `30 18 * * *`).
+- 담는 것: `qp-db-<시각>.dump`(`pg_dump -Fc`), `qp-data-<시각>.tar.gz`(`data/`). **`data/keys.env`·`.env`는 담지 않는다** — 키는 따로 보관한다. `data/cache`도 뺀다.
+- 30일 지난 백업은 스크립트가 지운다(`--keep-days`로 조정).
+- 복원(하이퍼테이블 포함):
+
+```bash
+docker compose -p qp-paper -f app/deploy/compose.yml --env-file .env stop api scheduler engine
+docker compose -p qp-paper -f app/deploy/compose.yml --env-file .env exec -T db \
+  psql -U quantpilot -d quantpilot -c "select timescaledb_pre_restore();"
+docker compose -p qp-paper -f app/deploy/compose.yml --env-file .env exec -T db \
+  pg_restore -U quantpilot -d quantpilot --clean --if-exists < backups/qp-db-<시각>.dump
+docker compose -p qp-paper -f app/deploy/compose.yml --env-file .env exec -T db \
+  psql -U quantpilot -d quantpilot -c "select timescaledb_post_restore();"
+app/scripts/deploy.sh
+```
+
+- 개발 PC(SQLite): `scripts/backup.sh --sqlite data/quantpilot.db --data-dir data --out backups`.
 
 ## 3. 환경변수
 
@@ -41,7 +80,7 @@
 
 | 잡 | 시각 | 동작 |
 | --- | --- | --- |
-| `db_backup` | 03:30 | `pg_dump` → 오브젝트 스토리지(30일 보관) |
+| `db_backup` | 03:30 | VPS cron이 `scripts/backup.sh` 실행: `pg_dump` + `data/`(키 제외) → 오브젝트 스토리지(30일 보관). scheduler 잡이 아니다 (§2.2, ADR 0019) |
 | `log_rotate` | 03:40 | 14일 |
 | `cost_report` | 매일 20:35 | AI 비용·거래 비용 일일 합계 알림 |
 | `weekly_gate_report` | 월 08:35 | 관문 G1~G4 상태 알림 |

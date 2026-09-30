@@ -1,0 +1,18 @@
+# 이미지에 들어가면 안 되는 것 — 키(.env, data/keys.env)와 로컬 산출물 (불변식 #10)
+.env
+.env.*
+!.env.example
+data/
+backups/
+.git/
+.github/
+.claude/
+.moai/
+.venv/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.ruff_cache/
+tests/
+web/
+docs/

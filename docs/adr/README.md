@@ -21,3 +21,4 @@
 | 0015 | Reconciler 할트 전달(settings 우편함)·브로커 기준 해제·critical 5분 반복 알림 | 승인 |
 | 0016 | 게이팅 OFF 섀도 원장(TickRunner 신호 미러링)·orders/fills.shadow·체결 재생 A/B 곡선·G2 n 정의 | 승인 |
 | 0017 | API v1: 수동 주문은 허브 큐로 엔진에, 실시간 허브(Redis/Memory)·HubBus 기록, 표준 라이브러리 JWT | 승인 |
+| 0019 | paper 배포: compose 서비스·migrate 단계·배포 가드·백업 범위·127.0.0.1 포트·CI 이미지 빌드 | 승인 |

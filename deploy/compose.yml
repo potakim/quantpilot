@@ -1,0 +1,130 @@
+# QuantPilot paper 배포 (docs/07 §1~§2, ADR 0019)
+#
+#   scripts/deploy.sh 로 띄운다. 직접 부를 때:
+#     docker compose -p qp-paper -f deploy/compose.yml --env-file /opt/quantpilot/.env up -d
+#
+# - 키·시크릿은 /opt/quantpilot/.env(권한 600)에서만 읽는다. 이미지·이 파일에는 값이 없다 (불변식 #10).
+# - QP_PAPER는 여기서 true로 못박는다. env 파일에 false가 있어도 덮어쓴다 (live는 별도 compose 프로젝트).
+# - db·redis는 호스트 포트를 열지 않는다. api는 127.0.0.1에만 — 외부 공개는 HTTPS 앞단을 둔 뒤에.
+# - engine↔scheduler는 DB settings 우편함(ADR 0013), api↔engine 큐·실시간은 redis(ADR 0017).
+
+name: qp-paper
+
+x-app: &app
+  image: ${QP_IMAGE:-ghcr.io/potakim/quantpilot}:${QP_TAG:-latest}
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  env_file:
+    - ${QP_ENV_FILE:-/opt/quantpilot/.env}
+  environment:
+    QP_ENV: paper
+    QP_PAPER: "true"
+    QP_DATA_DIR: /app/data
+    QP_DATABASE_URL: postgresql+asyncpg://quantpilot:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 필요}@db:5432/quantpilot
+    QP_REDIS_URL: redis://redis:6379/0
+    TZ: UTC
+  volumes:
+    - appdata:/app/data
+  restart: unless-stopped
+  logging: &logging
+    driver: json-file
+    options:
+      max-size: 20m
+      max-file: "5"
+
+services:
+  db:
+    image: ${QP_TIMESCALE_IMAGE:-timescale/timescaledb:latest-pg16}
+    environment:
+      POSTGRES_USER: quantpilot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 필요}
+      POSTGRES_DB: quantpilot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quantpilot -d quantpilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    logging: *logging
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    logging: *logging
+
+  # 스키마를 올리고 끝난다 (alembic upgrade head → TimescaleDB 하이퍼테이블 생성, ADR 0008)
+  migrate:
+    <<: *app
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    command: ["uvicorn", "quantpilot.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:${QP_API_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  scheduler:
+    <<: *app
+    command: ["python", "-m", "quantpilot.scheduler.main"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  engine:
+    <<: *app
+    command: ["python", "-m", "quantpilot.engine.main"]
+    # 재시작은 scripts/deploy.sh가 포지션·시간대를 확인한 뒤에만 (docs/07 §2)
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  # 화면 (P1-13). web/ 이 머지된 뒤 `--profile web`으로 켠다
+  web:
+    profiles: ["web"]
+    image: ${QP_WEB_IMAGE:-ghcr.io/potakim/quantpilot-web}:${QP_TAG:-latest}
+    build:
+      context: ../web
+    ports:
+      - "127.0.0.1:${QP_WEB_PORT:-3000}:3000"
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  redisdata:
+  appdata:

@@ -72,3 +72,5 @@ addopts = "-m 'not network'"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# MoAI 설정 문서(.claude)의 예제 코드 블록은 검사 대상이 아님 (P1-14a CI)
+extend-exclude = [".claude"]

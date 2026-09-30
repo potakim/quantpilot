@@ -52,7 +52,7 @@ jobs:
   #   1. eslint(+jsx-a11y) · tsc · vitest · next build · 비밀 누출 검사(check-secrets)
   #   2. 데모 API(scripts/web_demo_api.py, 합성 데이터) + next start
   #   3. Lighthouse 접근성 90+ — 데스크톱 4화면(lighthouserc.json) + 모바일 대시보드(lighthouserc.mobile.json)
-  # 아래 비밀번호·시크릿은 데모 API 전용 값이다 (실제 배포와 무관).
+  # 데모 API 비밀번호·시크릿은 실행마다 무작위로 만든다 (저장소에 값 없음).
   web:
     name: web (lint · test · build · lighthouse)
     runs-on: ubuntu-latest
@@ -63,11 +63,20 @@ jobs:
     env:
       NEXT_TELEMETRY_DISABLED: "1"
       QP_API_URL: http://127.0.0.1:8000
-      QP_ADMIN_PASSWORD: demo-ci-password
-      QP_JWT_SECRET: demo-ci-jwt-secret-0123456789abcdef-xyz
-      LHCI_PASSWORD: demo-ci-password
     steps:
       - uses: actions/checkout@v4
+
+      - name: 데모 비밀번호·시크릿 생성 (실행마다 무작위)
+        run: |
+          pw=$(openssl rand -hex 16)
+          secret=$(openssl rand -hex 32)
+          echo "::add-mask::$pw"
+          echo "::add-mask::$secret"
+          {
+            echo "QP_ADMIN_PASSWORD=$pw"
+            echo "LHCI_PASSWORD=$pw"
+            echo "QP_JWT_SECRET=$secret"
+          } >> "$GITHUB_ENV"
 
       - uses: actions/setup-node@v4
         with:

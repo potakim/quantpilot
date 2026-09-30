@@ -4,8 +4,8 @@
 (`data/synthetic.py` 캔들, 결정적인 판단·체결·포지션)를 심은 뒤 127.0.0.1:8000에 띄운다.
 보정·A/B 카드는 `qp report ab`와 같은 계산(`cli.build_ab_report`)을 심은 데이터에 돌린 값이다.
 
-- 비밀번호·JWT 시크릿은 `QP_ADMIN_PASSWORD`·`QP_JWT_SECRET` 환경변수로 덮을 수 있다.
-  아래 DEMO_* 기본값은 **이 데모 스크립트 전용**이며 실제 배포에 쓰면 안 된다.
+- 비밀번호·JWT 시크릿은 `QP_ADMIN_PASSWORD`·`QP_JWT_SECRET` 환경변수로만 받는다 (불변식 #10).
+  기본값은 두지 않는다 — 없으면 시작하지 않는다. CI는 실행마다 무작위 값을 만든다.
 - 패키지·테스트는 이 스크립트를 import하지 않는다.
 - 엔진 대신 짧은 루프가 하트비트·시세 틱·호가·portfolio를 흘려 WS 실시간 갱신을 보여 준다.
 
@@ -43,10 +43,6 @@ from quantpilot.core.models import (
 from quantpilot.data.synthetic import daily, seed_of
 
 log = logging.getLogger("web_demo_api")
-
-# ── 데모 전용 기본값 (운영 금지) ─────────────────────────────
-DEMO_ADMIN_PASSWORD = "demo-only-password"
-DEMO_JWT_SECRET = "demo-only-jwt-secret-not-for-production-0123"
 
 UP = Market.UPBIT
 COINS = {  # 심볼 → 합성 시작가 (원)
@@ -441,14 +437,19 @@ async def main(argv: list[str] | None = None) -> None:
     p.add_argument("--engine-down", action="store_true", help="하트비트를 보내지 않는다")
     a = p.parse_args(argv)
 
+    admin_password = os.environ.get("QP_ADMIN_PASSWORD", "")
+    jwt_secret = os.environ.get("QP_JWT_SECRET", "")
+    if not admin_password or not jwt_secret:
+        raise SystemExit("QP_ADMIN_PASSWORD와 QP_JWT_SECRET 환경변수를 설정해야 한다")
+
     tmp = Path(tempfile.mkdtemp(prefix="qp-demo-"))
     settings = Settings(
         _env_file=None,
         data_dir=tmp,
         keys_file=tmp / "keys.env",
         redis_url="",
-        admin_password=os.environ.get("QP_ADMIN_PASSWORD") or DEMO_ADMIN_PASSWORD,
-        jwt_secret=os.environ.get("QP_JWT_SECRET") or DEMO_JWT_SECRET,
+        admin_password=admin_password,
+        jwt_secret=jwt_secret,
     )
     engine, sessions = await memory_sessions()
     hub = MemoryHub()

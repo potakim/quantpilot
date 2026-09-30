@@ -69,9 +69,15 @@ class MemConfig:
 class Notes:
     def __init__(self):
         self.sent: list[tuple[str, str]] = []
+        self.keys: list[str | None] = []
+        self.resolved: list[str] = []
 
-    async def send(self, level, text):
+    async def send(self, level, text, *, key=None):
         self.sent.append((level, text))
+        self.keys.append(key)
+
+    async def resolve(self, key):
+        self.resolved.append(key)
 
 
 class SpyRunner:
@@ -80,6 +86,7 @@ class SpyRunner:
     def __init__(self, names=("vol_breakout",)):
         self.market = UP
         self.strategies = [create(n) for n in names]
+        self.risk = RiskManager()
         self.calls: list[str] = []
 
     async def on_time_exit(self, name):
@@ -119,6 +126,7 @@ DOC_JOBS = {
     "upbit_daily_exit", "krx_close_orders", "us_orb_entry_window", "us_eod_exit", "gem_rebalance",
     "kis_token_refresh", "upbit_prescreen", "morning_brief", "news_collect", "fill_realized_24h",
     "daily_review", "equity_snapshot", "reconcile", "month_roll", "engine_heartbeat",
+    "alert_repeat",  # 07 §6 critical 5분 반복 (P1-10)
 }  # fmt: skip
 
 
@@ -499,8 +507,8 @@ async def test_equity_snapshot_and_month_roll(sessions):
 async def test_unwired_job_is_skipped(caplog):
     registry.install(_ctx(Now()))
     with caplog.at_level(logging.INFO, logger="quantpilot.scheduler.context"):
-        await registry.run_job("reconcile")
-    assert any(getattr(r, "job", "") == "reconcile" for r in caplog.records)
+        await registry.run_job("krx_close_orders")
+    assert any(getattr(r, "job", "") == "krx_close_orders" for r in caplog.records)
 
 
 @pytest.mark.invariant

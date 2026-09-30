@@ -19,28 +19,63 @@ from quantpilot.db.repo import (
     SqlJudgmentRepo,
     SqlLedger,
     SqlOpsRepo,
+    SqlPositionRepo,
+    SqlRiskEventRepo,
 )
 from quantpilot.engine.link import SettingsEngineLink
-from quantpilot.scheduler.backup import account_source, backup_factory
+from quantpilot.execution.persistent_paper import PersistentPaperBroker
+from quantpilot.execution.reconciler import CashRef, Reconciler
+from quantpilot.notify.telegram import CriticalLogHandler, RepeatingNotifier, from_settings
+from quantpilot.scheduler.backup import account_source, backup_factory, restore_account
 from quantpilot.scheduler.context import JobContext
+from quantpilot.scheduler.jobs.health import reconcile
 from quantpilot.scheduler.registry import install, register
 
 log = logging.getLogger(__name__)
 
 
+def last_snapshot_cash(ops: SqlOpsRepo) -> CashRef:
+    """market → 마지막 평가액 스냅샷의 현금 (없으면 None). Reconciler의 DB 쪽 현금."""
+
+    async def read(market: Market) -> float | None:
+        rows = await ops.equity_snapshots(market)
+        return float(rows[-1]["cash"]) if rows else None
+
+    return read
+
+
 def build_context(sessions: Sessions, markets: tuple[Market, ...] = (Market.UPBIT,)) -> JobContext:
-    """DB 기반 JobContext. 뉴스 수집기·리뷰 모델은 부품이 준비되면 여기서 붙인다."""
+    """DB 기반 JobContext. 뉴스 수집기·리뷰 모델은 부품이 준비되면 여기서 붙인다.
+
+    대조할 브로커는 페이퍼 전용이라 DB 계좌 복원이다 — 실브로커 어댑터가 생기면 `brokers`만 바꾼다.
+    """
     config = SqlConfigRepo(sessions)
+    link = SettingsEngineLink(config)
+    ops = SqlOpsRepo(sessions)
+    notifier = RepeatingNotifier(from_settings(settings))
+
+    async def brokers(market: Market) -> PersistentPaperBroker:
+        return await restore_account(sessions, market)
+
     return JobContext(
-        link=SettingsEngineLink(config),
+        link=link,
         backup=backup_factory(sessions),
         markets=markets,
+        notifier=notifier,
         candles=SqlCandleRepo(sessions),
         judgments=SqlJudgmentRepo(sessions),
         config=config,
-        ops=SqlOpsRepo(sessions),
+        ops=ops,
         ledger=SqlLedger(sessions),
         account=account_source(sessions),
+        reconciler=Reconciler(
+            SqlPositionRepo(sessions),
+            SqlRiskEventRepo(sessions),
+            link,
+            notifier,
+            cash_ref=last_snapshot_cash(ops),
+        ),
+        brokers=brokers,
     )
 
 
@@ -73,7 +108,10 @@ async def run() -> None:
 
     if not settings.paper:
         raise RuntimeError("scheduler는 settings.paper=True에서만 (실계좌 배선 전)")
-    install(build_context(make_sessions(settings.db_url)))
+    ctx = build_context(make_sessions(settings.db_url))
+    install(ctx)
+    logging.getLogger().addHandler(CriticalLogHandler(ctx.notifier))
+    await reconcile(ctx)  # 시작 시 1회 (04 §5.4)
     scheduler = make_scheduler()
     ids = register(scheduler)
     scheduler.start()

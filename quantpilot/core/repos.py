@@ -88,6 +88,22 @@ class PositionRepo(Protocol):
         ...
 
 
+class RiskEventRepo(Protocol):
+    """risk_events: 서킷브레이커·할트·정합 불일치 기록 (02 §1.5). resolved_at이 비면 미해결."""
+
+    async def add(self, kind: str, detail: dict[str, Any], *, ts: datetime | None = None) -> int:
+        """이벤트 1건을 쓰고 id를 돌려준다."""
+        ...
+
+    async def open(self, kind: str, market: Market) -> dict[str, Any] | None:
+        """그 시장의 미해결 이벤트(가장 최근). 없으면 None."""
+        ...
+
+    async def resolve(self, event_id: int, *, ts: datetime | None = None) -> None:
+        """이벤트를 해결됨으로 표시한다."""
+        ...
+
+
 class ConfigRepo(Protocol):
     """전략 설정과 settings 키-값. 리스크 규칙은 여기 없다 (ADR 0003)."""
 

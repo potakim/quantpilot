@@ -18,3 +18,4 @@
 | 0012 | TypeSafe Jev 어댑터 계약: score 정규화·비동기 판단·실패는 hold·질문 문구 파일 | 승인 |
 | 0013 | engine ↔ scheduler 연결: settings 우편함·하트비트·백업 시간 청산 | 승인 |
 | 0014 | LLM 리뷰어·JudgmentPipeline 계약: Claude 샘플링 인자 없음·실패는 hold·prompt_hash 저장 위치 | 승인 |
+| 0015 | Reconciler 할트 전달(settings 우편함)·브로커 기준 해제·critical 5분 반복 알림 | 승인 |

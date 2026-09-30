@@ -6,11 +6,12 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, Protocol
+from typing import Any
 
 from quantpilot.core.models import Market
-from quantpilot.core.ports import EngineLink, EventBus
+from quantpilot.core.ports import EngineLink, EventBus, Notifier
 from quantpilot.engine.tick import TickRunner
+from quantpilot.notify.telegram import LogNotifier
 
 log = logging.getLogger(__name__)
 
@@ -21,22 +22,9 @@ BackupFactory = Callable[[Market, str], Awaitable[TickRunner]]
 AccountSource = Callable[[Market], Awaitable["tuple[float, float] | None"]]
 Reviewer = Callable[[dict[str, Any]], Awaitable["tuple[str, float | None]"]]
 Hook = Callable[["JobContext"], Awaitable[None]]
+AccountFactory = Callable[[Market], Awaitable[Any]]  # market → positions()·cash()가 있는 계좌
 
-
-class Notifier(Protocol):
-    """알림 (P1-10 텔레그램 전까지 로그)."""
-
-    async def send(self, level: str, text: str) -> None:
-        """level: info·warning·critical."""
-        ...
-
-
-class LogNotifier:
-    """알림을 로그로만 남긴다."""
-
-    async def send(self, level: str, text: str) -> None:
-        """level에 맞는 로그 레벨로 남긴다."""
-        log.log(logging.getLevelName(level.upper()), text, extra={"notify": level})
+__all__ = ["JobContext", "LogBus", "LogNotifier", "Notifier", "run_hook"]
 
 
 class LogBus:
@@ -69,6 +57,8 @@ class JobContext:
     account: AccountSource | None = None  # 시장별 (현금, 평가액)
     news: Any = None  # data.news.NewsCollector
     reviewer: Reviewer | None = None  # 일일 리뷰 요약 (Claude, P1-08 이후)
+    reconciler: Any = None  # execution.reconciler.Reconciler (P1-10)
+    brokers: AccountFactory | None = None  # 대조할 브로커 계좌 (페이퍼는 DB 계좌 복원)
     hooks: dict[str, Hook] = field(default_factory=dict)  # 아직 부품이 없는 잡의 본문
     stale_after: timedelta = STALE_AFTER
     backup_armed: set[Market] = field(default_factory=set)

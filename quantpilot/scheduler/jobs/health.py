@@ -1,4 +1,4 @@
-"""상태 잡: 엔진 하트비트 감시(백업 모드)·평가액 스냅샷·월 롤 (04 §8)."""
+"""상태 잡: 엔진 하트비트 감시(백업 모드)·평가액 스냅샷·월 롤·정합 검사·critical 반복 (04 §8, 07 §6)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,11 @@ from quantpilot.scheduler.jobs.exits import TIME_EXIT_STRATEGIES, engine_alive, 
 log = logging.getLogger(__name__)
 
 
+def heartbeat_key(market: Market) -> str:
+    """하트비트 끊김 critical 알림을 묶는 key (복구 시 반복 중단)."""
+    return f"heartbeat.{Market(market).value}"
+
+
 async def engine_heartbeat(ctx: JobContext) -> None:
     """30초마다: 하트비트가 90초 넘게 없으면 알림 + 백업 모드. 백업 모드면 밀린 청산 명령을 직접 처리.
 
@@ -22,10 +27,13 @@ async def engine_heartbeat(ctx: JobContext) -> None:
         if not alive and market not in ctx.backup_armed:
             ctx.backup_armed.add(market)
             await ctx.notifier.send(
-                "critical", f"engine heartbeat lost ({market.value}) — backup exit armed"
+                "critical",
+                f"engine heartbeat lost ({market.value}) — backup exit armed",
+                key=heartbeat_key(market),
             )
         elif alive and market in ctx.backup_armed:
             ctx.backup_armed.discard(market)
+            await ctx.notifier.resolve(heartbeat_key(market))
             await ctx.notifier.send("info", f"engine heartbeat recovered ({market.value})")
         if alive:
             continue
@@ -65,3 +73,19 @@ async def month_roll(ctx: JobContext) -> None:
             continue
         await ctx.config.set_setting(month_start_key(market), {"month": month, "equity": acct[1]})
         log.info("month_start_equity 저장", extra={"market": market.value, "month": month})
+
+
+async def reconcile(ctx: JobContext) -> None:
+    """5분마다(+ scheduler 시작 시): 브로커 ↔ DB 대조, 불일치면 할트 (04 §5.4)."""
+    if ctx.reconciler is None or ctx.brokers is None:
+        log.info("job skipped: not wired", extra={"job": "reconcile"})
+        return
+    for market in ctx.markets:
+        await ctx.reconciler.run(market, await ctx.brokers(market))
+
+
+async def alert_repeat(ctx: JobContext) -> None:
+    """매분: 해결되지 않은 critical을 5분마다 다시 보낸다 (07 §6)."""
+    tick = getattr(ctx.notifier, "tick", None)
+    if tick is not None:
+        await tick()

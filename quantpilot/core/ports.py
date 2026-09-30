@@ -136,6 +136,30 @@ class EngineLink(Protocol):
         """명령을 처리했다고 기록한다."""
         ...
 
+    async def halt(self, market: Market, reason: str, detail: dict[str, Any] | None = None) -> None:
+        """엔진에 할트를 건다 (정합 불일치 등, ADR 0015). 해제는 clear_halt(사람 조작)로만."""
+        ...
+
+    async def halt_reason(self, market: Market) -> str | None:
+        """걸려 있는 할트 사유. 없으면 None."""
+        ...
+
+    async def clear_halt(self, market: Market) -> None:
+        """할트를 푼다 — 사람이 "브로커 기준으로 맞추기"를 눌렀을 때만 부른다."""
+        ...
+
+
+class Notifier(Protocol):
+    """알림 (07 §6 등급: info·warning·critical). key가 같은 critical은 resolve 전까지 반복될 수 있다."""
+
+    async def send(self, level: str, text: str, *, key: str | None = None) -> None:
+        """알림 1건. key는 반복·해제를 묶는 이름(없으면 text)."""
+        ...
+
+    async def resolve(self, key: str) -> None:
+        """key로 걸린 critical 반복을 멈춘다."""
+        ...
+
 
 class EventBus(Protocol):
     """이벤트 발행 (1단계 Redis pub/sub → api → 화면 WS)."""

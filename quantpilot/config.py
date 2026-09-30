@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     google_api_key: str = ""  # Gemini 요약기·리뷰어 (judgment/google.py)
     dart_api_key: str = ""  # OpenDART 공시 목록 (data/news.py, P1-06)
+    # 알림 (07 §6, notify/telegram.py). 비어 있으면 로그로만
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
 
     @property
     def cache_dir(self) -> Path:

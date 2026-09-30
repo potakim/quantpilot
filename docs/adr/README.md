@@ -16,3 +16,4 @@
 | 0010 | 백테스터를 TickRunner로 돌릴 때의 배선: 규칙 미적용 게이트·게이팅 OFF·매도 수량 캡 | 승인 |
 | 0011 | OrderExecutor 계약: 반환 타입·원장 기록 주체·페이퍼 영속화·레이트리밋 | 승인 |
 | 0012 | TypeSafe Jev 어댑터 계약: score 정규화·비동기 판단·실패는 hold·질문 문구 파일 | 승인 |
+| 0013 | engine ↔ scheduler 연결: settings 우편함·하트비트·백업 시간 청산 | 승인 |

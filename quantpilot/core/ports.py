@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from quantpilot.core.events import JudgmentEvent, SignalEvent
-from quantpilot.core.models import Fill, Order, Position, Target
+from quantpilot.core.models import Fill, Market, Order, Position, Target
 
 
 class Clock(Protocol):
@@ -110,6 +110,30 @@ class OrderExecutor(Protocol):
 
     def equity(self) -> float:
         """현금 + 포지션 평가액."""
+        ...
+
+
+class EngineLink(Protocol):
+    """engine ↔ scheduler 사이 하트비트와 시간 청산 명령 (04 §8). 시각은 UTC tz-aware."""
+
+    async def beat(self, market: Market) -> None:
+        """엔진이 살아 있음을 기록한다."""
+        ...
+
+    async def last_beat(self, market: Market) -> datetime | None:
+        """마지막 하트비트 시각. 없으면 None."""
+        ...
+
+    async def request_time_exit(self, market: Market, strategy: str) -> str:
+        """시간 청산 명령을 넣고 명령 id를 돌려준다."""
+        ...
+
+    async def pending_time_exit(self, market: Market, strategy: str) -> str | None:
+        """아직 처리되지 않은 시간 청산 명령 id. 없으면 None."""
+        ...
+
+    async def ack_time_exit(self, market: Market, strategy: str, cmd_id: str) -> None:
+        """명령을 처리했다고 기록한다."""
         ...
 
 

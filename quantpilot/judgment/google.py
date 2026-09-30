@@ -1,4 +1,4 @@
-"""Google Gemini 어댑터 (04 judgment 표). 1단계 P1-06: 뉴스 요약기. 리뷰어(GeminiReviewer)는 P1-08.
+"""Google Gemini 어댑터 (04 judgment 표). P1-06 뉴스 요약기 + P1-08 리뷰어(GeminiReviewer).
 
 - `google-genai` SDK는 이 파일 안에서만 import한다(try/except ImportError). 테스트는 `client`를 주입한다
 - 키는 `settings.google_api_key`(QP_GOOGLE_API_KEY)로만 받는다. 로그·예외·repr에 키를 싣지 않는다
@@ -10,13 +10,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+import time
 from string import Template
 from typing import Any, Protocol
 
+from quantpilot.core.models import JudgeResult
 from quantpilot.core.news import RISK_FLAGS, SUMMARY_MAX_CHARS, Summary
+from quantpilot.judgment.base import LLMProvider, LLMVerdict, State
+from quantpilot.judgment.pricing import cost_usd, price_for
+from quantpilot.judgment.prompts import MAX_OUTPUT_TOKENS, load_review_prompt, parse_verdict
 
 try:
     from google import genai
@@ -113,3 +119,71 @@ class GeminiSummarizer:
             )
             return Summary(_truncate(title), (), None)
         return parse_summary(raw, fallback_title=title)
+
+
+class GeminiReviewer(LLMProvider):
+    """진입 후보 리스크 검토 (LLM 2모델 합의의 한쪽, 06 §5). ClaudeReviewer와 같은 프롬프트를 쓴다."""
+
+    def __init__(
+        self,
+        model: str = "gemini-3.5-flash",
+        *,
+        api_key: str | None = None,
+        client: Any = None,
+        prompt_version: str = "v1",
+    ) -> None:
+        price_for(model)  # 단가표에 없는 모델이면 시작할 때 실패한다
+        self.model = model
+        self.name = model
+        self.prompt = load_review_prompt(prompt_version)
+        if client is None:
+            if genai is None:
+                raise ImportError("google-genai가 필요합니다: uv pip install -e '.[ai]'")
+            if api_key is None:
+                from quantpilot.config import settings
+
+                api_key = settings.google_api_key
+            if not api_key:
+                raise ValueError("QP_GOOGLE_API_KEY가 비어 있습니다")
+            client = genai.Client(api_key=api_key)
+        self._client = client
+
+    def __repr__(self) -> str:
+        return f"GeminiReviewer(model={self.model!r})"
+
+    def review(self, state: State, judge: JudgeResult) -> LLMVerdict:
+        """동기 리뷰 (CLI용). 이벤트 루프 안에서는 areview를 쓴다."""
+        return asyncio.run(self.areview(state, judge))
+
+    async def areview(self, state: State, judge: JudgeResult, rule: str = "") -> LLMVerdict:
+        """후보 1건 검토 (`client.aio`). 실패는 예외 대신 hold 판정으로 돌려준다."""
+        t = time.perf_counter()
+        ph = self.prompt.prompt_hash
+        try:
+            resp = await self._client.aio.models.generate_content(
+                model=self.model,
+                contents=self.prompt.render(state.render(), judge, rule),
+                config={
+                    "temperature": 0,
+                    "max_output_tokens": MAX_OUTPUT_TOKENS,
+                    "response_mime_type": "application/json",
+                },
+            )
+            raw = getattr(resp, "text", None) or ""
+        except Exception as e:  # noqa: BLE001 — SDK·네트워크 오류가 다양, 판단은 hold로 끝낸다
+            log.warning(
+                "gemini review failed", extra={"model": self.model, "error": type(e).__name__}
+            )
+            ms = (time.perf_counter() - t) * 1000
+            return LLMVerdict(
+                self.name, False, f"호출 실패({type(e).__name__}) → hold", ms, 0.0, ph
+            )
+        ms = (time.perf_counter() - t) * 1000
+        usage = getattr(resp, "usage_metadata", None)
+        cost = cost_usd(
+            self.model,
+            int(getattr(usage, "prompt_token_count", 0) or 0),
+            int(getattr(usage, "candidates_token_count", 0) or 0),
+        )
+        approve, reason = parse_verdict(raw)
+        return LLMVerdict(self.name, approve, reason, ms, cost, ph)

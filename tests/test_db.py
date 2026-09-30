@@ -292,6 +292,7 @@ async def test_signal_judgment_flow(sessions):
         latency_ms=420.0,
         model="stub",
         cost_usd=0.002,
+        raw={"prompt_hash": "0123456789abcdef"},
     )
     jid = await judgments.add(
         signal_id=sig,
@@ -306,6 +307,8 @@ async def test_signal_judgment_flow(sessions):
 
     j = await judgments.get(jid)
     assert j["answers"] == result.answers and j["provider"] == "stub"
+    # 질문 문구 prompt_hash는 state jsonb에 함께 남는다 (ADR 0014)
+    assert j["state"] == {"text": "state v1", "prompt_hash": "0123456789abcdef"}
     assert j["gate"] == "half" and j["realized_ret_24h"] == 0.012 and j["direction_hit"] is True
     s = await signals.get(sig)
     assert (s["outcome"], s["outcome_reason"]) == ("judged_hold", "confidence<0.9")

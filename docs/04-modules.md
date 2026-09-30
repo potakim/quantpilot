@@ -57,7 +57,7 @@ class FeatureBuilder:  # features/builder.py — core.ports.FeatureBuilder Proto
 | `laya.py` | `LayaJudge(base_url)` | 자체 호스팅 HTTP. 같은 스키마 |
 | `anthropic.py` | `ClaudeReviewer(model="claude-sonnet-5")` | `review()` + `daily_review()` + `answer_question()` |
 | `google.py` | `GeminiReviewer(model="gemini-3.5-flash")`, `GeminiSummarizer(model="gemini-3.5-flash-lite")` | 리뷰 / 뉴스 요약 |
-| `pipeline.py` | `JudgmentPipeline(judge, reviewers, settings)` | `run(state) -> Decision` — 하드블록 → 게이트 → LLM 합의(병렬, 30초 타임아웃) → 로그 기록. `Decision`은 0단계 `decide()`와 동일 |
+| `pipeline.py` | `JudgmentPipeline(judge, reviewers, bus=...)`, `build_pipeline(settings)` | `evaluate(signal, state) -> JudgmentEvent` — 하드블록 → 게이트 → LLM 합의(병렬, 30초 타임아웃) → `decide()`. 일일 AI 예산·judge_down 발행 (ADR 0014) |
 | `calibration.py` | `brier(judgments)`, `ece(judgments, bins=10)`, `bucket_hit_rates()` | `realized_ret_24h`가 채워진 행만 |
 
 LLM 프롬프트 계약은 06 문서. 모든 프로바이더는 `cost_usd`를 계산해 돌려준다(토큰 × 단가표 `judgment/pricing.py`).

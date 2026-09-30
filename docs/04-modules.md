@@ -17,6 +17,7 @@ strategies ──✕──▶ 그 외 전부      (core만)
 
 - `clock.py` — `MarketClock(market)`: `now()`, `is_open(ts)`, `next_open()`, `next_close()`, `session_bounds(date)`, `to_local(ts_utc)`, `to_utc(ts_local)`. 휴장일·특수 세션은 `core/calendars.py` 내장 표(2020~2027, 범위 밖은 `CalendarOutOfRange`), 서머타임은 표준 라이브러리 `zoneinfo`. 업비트는 24시간이며 세션은 09:00 KST 경계. `exchange_calendars`는 `data/calendars.py` 선택 어댑터로만 쓴다 (ADR 0009).
 - `events.py` — 엔진 내부 이벤트 dataclass: `TradeEvent`, `BarClosed`, `SignalEvent`, `JudgmentEvent`, `OrderEvent`, `FillEvent`, `RiskEvent`.
+- `news.py` — `NewsItem`·`EventItem`·`Summary`(요약 계약: ≤100자, `RISK_FLAGS` 안의 플래그, 위험도 0~1|None), `raw_hash()`, Protocol `Summarizer`·`NewsSource`·`EventSource`·`NewsRepo`. 뉴스·이벤트 시각은 시장에 속하지 않으므로 UTC tz-aware.
 - `errors.py` — `BrokerError(retryable: bool)`, `RateLimited(retry_after)`, `JudgeTimeout`, `DataStale`, `CalendarOutOfRange`.
 
 ## 2. strategies (0단계 완료)
@@ -30,14 +31,19 @@ strategies ──✕──▶ 그 외 전부      (core만)
 ## 3. features (1단계 신규)
 
 ```python
-class FeatureBuilder:
-    def build(self, symbol: str, ctx: Context, target: Target, news: list[NewsItem]) -> State
+class FeatureBuilder:  # features/builder.py — core.ports.FeatureBuilder Protocol 구현
+    def __init__(self, market, *, news: NewsSource | None = None, events: EventSource | None = None,
+                 spread: Callable[[str], float | None] | None = None, max_tokens: int = 400): ...
+    def build(self, *, symbol: str, strategy: str, target: Target, ctx: Context) -> State
 ```
 
-- 숫자는 **등급·백분위**로 바꾼다: `vol_pctl_20d`(0~100), `ma_score`(0~1), `volume_ratio`(당일/20일 평균, 소수 1자리), `spread_bps`, `dist_from_high_20d_pct`, `rsi2`(정수).
-- 뉴스는 최근 24시간 중 위험 플래그 있는 것 우선, 최대 3건, 각 100자.
-- `events_24h`: 캘린더(FOMC·CPI·실적·상장폐지 심사·하드포크)에서 24시간 내 항목. 캘린더는 `data/events.py`가 수동 YAML + DART 공시로 채운다.
-- 출력 `State.render()`는 400토큰 이내. 초과하면 뉴스부터 자른다. 테스트: `len(tokens) <= 400`.
+뉴스·이벤트는 인자가 아니라 생성자로 주입한 소스(`NewsSource`·`EventSource`, `core/news.py`)에서 `ctx.ts` 기준으로 읽는다. `build`가 동기라서 수집기가 비동기로 채운 메모리 캐시(`data/news.NewsCache`)를 읽는다. Protocol 시그니처는 P1-04(ADR 0010)의 것을 그대로 쓴다.
+
+- 숫자는 **등급·백분위**로 바꾼다: `vol_pctl_20d`(0~100, 20봉 변동성의 최근 252개 중 백분위), `ma_score`(0~1, 5·10·20·60 이평 위 비율), `volume_ratio`(당일/직전 20봉 평균, 소수 1자리), `spread_bps`(스프레드 공급자가 있을 때만), `dist_from_high_20d_pct`, `rsi2`(정수). 데이터가 모자라는 피처는 넣지 않는다.
+- `target.price`가 있으면(장중 가격 도달 진입) 현재 봉을 빼고 계산한다 (불변식 #3).
+- 뉴스는 최근 24시간 중 요약이 있는 것만, 위험 플래그 있는 것 우선 → 최신순, 최대 3건, 각 100자. 제목·링크는 로그(DEBUG)에만.
+- `events_24h`: 캘린더(FOMC·CPI·실적·상장폐지 심사·하드포크·거래소 점검)에서 **앞뒤** 24시간 내 항목, `kind: 제목 (+5h)` / 지난 것은 `(-3h)`. 캘린더는 `data/events.py`가 수동 YAML + DART 공시로 채운다.
+- 출력 `State.render()`는 400토큰 이내. 초과하면 뉴스부터 자르고, 그래도 넘으면 이벤트를 줄인다. 토큰 수는 `features.count_tokens`(보수적 추정: 영문 4자당 1, 숫자·기호·한글 글자당 1). 테스트: `count_tokens(state.render()) <= 400`.
 
 ## 4. judgment
 
@@ -112,8 +118,8 @@ class OrderExecutor:
 | `kis_ws.py` | `KISStream(app_key, symbols)` — 체결가·호가·체결통보. approval_key 발급, 41건 제한 관리 |
 | `aggregator.py` | `CandleAggregator(tf, market)` — `on_trade()` → 새 구간 첫 체결이면 직전 봉 `BarClosed`, `on_timer(now)` → 마감+2초 지난 봉 확정. 체결 없는 구간은 봉 없음, 확정된 구간의 늦은 체결은 버림. 일봉 경계는 업비트 09:00 KST |
 | `store.py` | `CandleStore(repo: CandleRepo, market)` — `upsert(bars)`, `load(symbol, tf, start, end)` → OHLCV DataFrame(loader 규격, `[start, end)`), 구간 캐시(upsert 시 해당 심볼·주기 폐기) |
-| `news.py` | `NewsCollector(feeds)` — RSS·DART 수집, 중복 제거(`raw_hash`), `GeminiSummarizer`로 요약·위험 플래그 |
-| `events.py` | 이벤트 캘린더 (YAML + 공시) |
+| `news.py` | `NewsCollector(feeds, summarizer, repo, keywords=, stock_symbols=)` — RSS·Atom·DART 공시 목록 수집(`httpx`, `fetch` 주입 가능), 48시간 넘은 것 제외, 중복 제거(`raw_hash`, 배치 안 + 저장소), 종목·키워드 매칭(`"*"`는 거시 키워드 → 전 종목, 미매칭은 버림), 그 뒤에만 요약기 호출. DOCTYPE/ENTITY 있는 XML 거부. `NewsCache`(메모리 저장소) + `CacheNewsSource`(피처 빌더용). DART 키는 `QP_DART_API_KEY` |
+| `events.py` | `EventCalendar` — 수동 YAML(`EventCalendar.from_yaml`, tz 없는 시각은 `market` 현지시간) + `events_from_dart`(상장폐지·관리종목·거래정지·잠정실적 공시 → 그 종목 이벤트) |
 
 ## 7. engine (1단계 신규)
 

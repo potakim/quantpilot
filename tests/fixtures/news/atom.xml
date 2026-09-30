@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Crypto Wire</title>
+  <entry>
+    <title>Ethereum hard fork scheduled</title>
+    <link href="https://wire.example.com/e1"/>
+    <updated>2026-09-30T03:00:00Z</updated>
+    <summary>Ethereum developers set the fork date.</summary>
+  </entry>
+</feed>

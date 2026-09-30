@@ -1,0 +1,9 @@
+# Node·Next 산출물 (ADR 0018 — Node 도구는 web/ 안에만)
+node_modules/
+.next/
+out/
+coverage/
+.lighthouseci/
+*.tsbuildinfo
+.env*.local
+npm-debug.log*

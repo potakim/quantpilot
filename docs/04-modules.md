@@ -58,7 +58,8 @@ class FeatureBuilder:  # features/builder.py — core.ports.FeatureBuilder Proto
 | `anthropic.py` | `ClaudeReviewer(model="claude-sonnet-5")` | `review()` + `daily_review()` + `answer_question()` |
 | `google.py` | `GeminiReviewer(model="gemini-3.5-flash")`, `GeminiSummarizer(model="gemini-3.5-flash-lite")` | 리뷰 / 뉴스 요약 |
 | `pipeline.py` | `JudgmentPipeline(judge, reviewers, bus=...)`, `build_pipeline(settings)` | `evaluate(signal, state) -> JudgmentEvent` — 하드블록 → 게이트 → LLM 합의(병렬, 30초 타임아웃) → `decide()`. 일일 AI 예산·judge_down 발행 (ADR 0014) |
-| `calibration.py` | `brier(judgments)`, `ece(judgments, bins=10)`, `bucket_hit_rates()` | `realized_ret_24h`가 채워진 행만 |
+| `calibration.py` | `brier(judgments, *, p="confidence")`, `ece(judgments, bins=10)`, `bucket_hit_rates(judgments, ranges)`, `is_monotonic(buckets)`, `calibration(judgments) -> dict` | `realized_ret_24h`가 채워진 행만. p는 `confidence` 또는 `signal_quality`. 표본이 없으면 None (ADR 0016) |
+| `ab.py` | `equity_curve(fills, prices, cash)`, `book_stats(...) -> BookStats`, `g2_verdict(on, off, brier, n)`, `ab_report(...)`, `render_markdown(report)` | 원장별 체결 재생 곡선으로 수익률·MDD·체결 수·비용. n < 20이면 판정 보류. CLI `qp report ab --weeks 4` (ADR 0016) |
 
 LLM 프롬프트 계약은 06 문서. 모든 프로바이더는 `cost_usd`를 계산해 돌려준다(토큰 × 단가표 `judgment/pricing.py`).
 
@@ -68,7 +69,7 @@ LLM 프롬프트 계약은 06 문서. 모든 프로바이더는 `cost_usd`를 �
 
 | 파일 | 클래스 | 라이브러리 | 특이사항 |
 | --- | --- | --- | --- |
-| `paper.py` | `PaperBroker` | — | 0단계 완료. 1단계: 포지션·현금을 DB에 저장·복원하는 `PersistentPaperBroker`(`persistent_paper.py`, `restore()`·`persist()`). 주문·체결 원장은 `OrderExecutor`가 쓴다 (ADR 0011) |
+| `paper.py` | `PaperBroker` | — | 0단계 완료. 1단계: 포지션·현금을 DB에 저장·복원하는 `PersistentPaperBroker`(`persistent_paper.py`, `restore()`·`persist()`). 주문·체결 원장은 `OrderExecutor`가 쓴다 (ADR 0011). 섀도 계좌는 `book="shadow"` + `SettingsPositionRepo`(settings jsonb) (ADR 0016) |
 | `upbit.py` | `UpbitBroker` | pyupbit 또는 직접 REST(JWT HS512) | 주문 12/s, 조회 30/s. `order-test`로 사전 검증. 체결 확인은 `/v1/order` 폴링 0.5s |
 | `kis.py` | `KISBroker(paper: bool)` | python-kis | 토큰 24h(`TokenManager`), 실전 20건/s·모의 2건/s, 체결통보 WS. 국내·해외 같은 클래스, 시장 파라미터 |
 | `alpaca.py` | `AlpacaPaperBroker` | alpaca-py | 페이퍼 전용. 200 req/min |
@@ -128,7 +129,8 @@ class OrderExecutor:
 ```python
 class TickRunner:
     """시장 하나의 틱 루프. 01-architecture §3의 1~8단계."""
-    def __init__(self, market, strategies, feature_builder, pipeline, executor, risk, clock, bus)
+    def __init__(self, market, strategies, feature_builder, pipeline, executor, risk, clock, bus,
+                 *, cost, shadow=None)   # shadow: 게이팅 OFF 섀도 executor (ADR 0016)
     async def on_bar_closed(self, ev: BarClosed) -> None
     async def on_bars_closed(self, evs: Sequence[BarClosed]) -> None  # 같은 시각 봉 묶음 (ADR 0010)
     async def on_time_exit(self, strategy_name: str) -> None      # scheduler가 호출
@@ -138,6 +140,7 @@ class TickRunner:
 - 시장별 `TickRunner` 1개, `asyncio.TaskGroup`으로 실행. 전략 간 순서는 등록 순, 같은 심볼에 두 전략이 반대 target을 내면 **청산이 먼저**.
 - `on_stop_check`는 체결가마다 돌지만 판단 모델·LLM을 호출하지 않는다. 진입 target의 `stop` 이탈 시 즉시 exit target.
 - `feature_builder`·`pipeline`·`executor`·`risk`·`clock`·`bus`는 `core/ports.py`의 Protocol이다. 봉 히스토리는 `engine/history.py::BarHistory`(백테스트는 미리 적재한 DataFrame의 커서, 실전은 `CandleStore.load`로 시드 후 봉마다 추가).
+- `shadow` executor를 주면 ON이 발행한 전략 신호를 같은 틱에 섀도 계좌로도 낸다(판단은 한 번, 섀도 배수 1.0, 자기 `risk.check → submit`, 손절·시간 청산은 원장별). 섀도 체결은 버스에 발행하지 않는다. 페이퍼 엔진은 항상 섀도를 둔다 (06 §6.2, ADR 0016).
 - 백테스터는 이 `TickRunner`를 `PaperBroker` + `DirectExecutor` + `StubPipeline(StubJudge, gating=False)` + `ReplayClock` + `UnrestrictedRisk`(기본, `apply_risk=True`면 `RiskManager`)로 돌린다. 0단계 `Backtester.run`의 인라인 루프는 제거했다. 배선 결정과 0단계 대비 수치 차이는 ADR 0010.
 
 ## 8. scheduler (1단계 신규)
@@ -167,7 +170,7 @@ engine ↔ scheduler는 P1-12 Redis 전까지 DB `settings` 우편함(`engine/li
 
 ## 9. db
 
-`models.py`(SQLAlchemy), `mappers.py`(dataclass ↔ ORM), `repo.py`(`SqlCandleRepo`, `SqlLedger`, `SqlSignalRepo`, `SqlJudgmentRepo`, `SqlPositionRepo`, `SqlRiskEventRepo`, `SqlConfigRepo`), `migrations/`(alembic). 코어는 `core/repos.py`의 Protocol(`CandleRepo`, `Ledger`, `SignalRepo`, `JudgmentRepo`, `PositionRepo`, `RiskEventRepo`, `ConfigRepo`)만 알고 구현은 주입 (ADR 0008).
+`models.py`(SQLAlchemy), `mappers.py`(dataclass ↔ ORM), `repo.py`(`SqlCandleRepo`, `SqlLedger`(`shadow=True`면 섀도 원장 행만), `SqlSignalRepo`, `SqlJudgmentRepo`, `SqlPositionRepo`, `SqlRiskEventRepo`, `SqlConfigRepo`), `migrations/`(alembic). 코어는 `core/repos.py`의 Protocol(`CandleRepo`, `Ledger`, `SignalRepo`, `JudgmentRepo`, `PositionRepo`, `RiskEventRepo`, `ConfigRepo`)만 알고 구현은 주입 (ADR 0008).
 
 ## 10. api
 

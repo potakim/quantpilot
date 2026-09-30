@@ -69,19 +69,23 @@ class SqlCandleRepo:
 
 
 class SqlLedger:
-    """주문·체결 원장."""
+    """주문·체결 원장. shadow=True면 게이팅 OFF 섀도 원장 행만 쓰고 읽는다 (ADR 0016)."""
 
-    def __init__(self, sessions: Sessions) -> None:
+    def __init__(self, sessions: Sessions, *, shadow: bool = False) -> None:
         self._sessions = sessions
+        self.shadow = shadow
 
     async def save_order(self, order: Order) -> None:
         """주문을 새로 쓰거나 상태를 갱신한다 (id 기준 merge)."""
+        row = order_to_row(order)
+        row.shadow = self.shadow
         async with self._sessions.begin() as s:
-            await s.merge(order_to_row(order))
+            await s.merge(row)
 
     async def record(self, fill: Fill) -> int:
         """체결 1건을 원장에 추가하고 행 id를 돌려준다."""
         row = fill_to_row(fill)
+        row.shadow = self.shadow
         async with self._sessions.begin() as s:
             s.add(row)
             await s.flush()
@@ -90,8 +94,10 @@ class SqlLedger:
     async def fills(
         self, market: Market, *, symbol: str | None = None, since: datetime | None = None
     ) -> list[Fill]:
-        """체결을 시간순으로 조회한다."""
-        q = select(FillRow).where(FillRow.market == Market(market).value)
+        """이 원장(ON 또는 섀도)의 체결을 시간순으로 조회한다."""
+        q = select(FillRow).where(
+            FillRow.market == Market(market).value, FillRow.shadow.is_(self.shadow)
+        )
         if symbol is not None:
             q = q.where(FillRow.symbol == symbol)
         if since is not None:
@@ -216,6 +222,29 @@ class SqlJudgmentRepo:
                     "price_hint": sig.price_hint,
                 }
             )
+        return out
+
+    async def between(self, market: Market, start: datetime, end: datetime) -> list[dict[str, Any]]:
+        """시장의 [start, end) 판단(현지 tz-naive) + 신호 심볼. 보정·A/B 리포트 입력 (06 §6)."""
+        q = (
+            select(JudgmentRow, SignalRow)
+            .join(SignalRow, JudgmentRow.signal_id == SignalRow.id)
+            .where(
+                SignalRow.market == Market(market).value,
+                JudgmentRow.ts >= to_db_ts(start, market),
+                JudgmentRow.ts < to_db_ts(end, market),
+            )
+            .order_by(JudgmentRow.ts, JudgmentRow.id)
+        )
+        async with self._sessions() as s:
+            rows = (await s.execute(q)).all()
+        out = []
+        for j, sig in rows:
+            d = _row_dict(j)
+            d.update(
+                ts=from_db_ts(j.ts, Market(market)), symbol=sig.symbol, strategy_id=sig.strategy_id
+            )
+            out.append(d)
         return out
 
     async def get(self, judgment_id: int) -> dict[str, Any] | None:

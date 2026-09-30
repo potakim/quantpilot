@@ -2,12 +2,16 @@
 
 체결 계산은 PaperBroker와 같다. 주문·체결 원장은 OrderExecutor가 쓰고, 이 클래스는 계좌 상태만 쓴다.
 submit은 동기라서 바뀐 심볼을 모아 두었다가 `persist()`에서 한 번에 쓴다.
+
+게이팅 OFF 섀도 계좌(06 §6.2, ADR 0016)는 `book="shadow"`로 현금 키를 가르고, 포지션은
+`SettingsPositionRepo`로 settings jsonb에 둔다 — positions 테이블(PK market·symbol·strategy)은 ON 계좌 전용.
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime
+from typing import Any
 
 from quantpilot.backtest.costs import CostModel
 from quantpilot.core.models import Fill, Market, Order, Position
@@ -25,8 +29,10 @@ class PersistentPaperBroker(PaperBroker):
         positions: PositionRepo,
         config: ConfigRepo,
         allow_short: bool = False,
+        book: str = "",
     ):
         super().__init__(market, cost, initial_cash, allow_short=allow_short)
+        self.book = book
         self.position_repo = positions
         self.config = config
         self._dirty: dict[str, Position] = {}
@@ -35,7 +41,8 @@ class PersistentPaperBroker(PaperBroker):
     @property
     def cash_key(self) -> str:
         """settings에 가상 현금을 두는 키."""
-        return f"paper.cash.{Market(self.market).value}"
+        prefix = f"paper.{self.book}." if self.book else "paper."
+        return f"{prefix}cash.{Market(self.market).value}"
 
     async def restore(self) -> None:
         """DB의 포지션·현금으로 계좌를 되살린다. 저장된 현금이 없으면 초기 현금 그대로."""
@@ -64,3 +71,52 @@ class PersistentPaperBroker(PaperBroker):
         if self._cash_dirty:
             self._cash_dirty = False
             await self.config.set_setting(self.cash_key, self._cash)
+
+
+class SettingsPositionRepo:
+    """PositionRepo를 settings 키 하나(jsonb 목록)로 구현한다. 섀도 계좌 포지션용 (ADR 0016)."""
+
+    def __init__(self, config: ConfigRepo, market: Market, *, book: str = "shadow") -> None:
+        self.config = config
+        self.market = Market(market)
+        self.key = f"paper.{book}.positions.{self.market.value}"
+
+    async def upsert(self, position: Position) -> None:
+        """포지션을 저장한다. 수량이 0이면 지운다."""
+        rows = [r for r in await self._rows() if r["symbol"] != position.symbol]
+        if position.is_open:
+            rows.append(_to_json(position))
+        await self.config.set_setting(self.key, sorted(rows, key=lambda r: r["symbol"]))
+
+    async def all(self, market: Market) -> list[Position]:
+        """저장된 열린 포지션 전부."""
+        if Market(market) != self.market:
+            return []
+        return [_from_json(r, self.market) for r in await self._rows()]
+
+    async def _rows(self) -> list[dict[str, Any]]:
+        return list(await self.config.get_setting(self.key) or [])
+
+
+def _to_json(p: Position) -> dict[str, Any]:
+    return {
+        "symbol": p.symbol,
+        "qty": p.qty,
+        "avg_price": p.avg_price,
+        "opened_at": p.opened_at.isoformat() if p.opened_at else None,
+        "strategy": p.strategy,
+        "stop": p.stop,
+    }
+
+
+def _from_json(r: dict[str, Any], market: Market) -> Position:
+    opened = r.get("opened_at")
+    return Position(
+        r["symbol"],
+        float(r["qty"]),
+        float(r["avg_price"]),
+        datetime.fromisoformat(opened) if opened else None,
+        r.get("strategy", ""),
+        market,
+        r.get("stop"),
+    )

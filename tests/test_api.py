@@ -441,6 +441,46 @@ async def test_backtest_async_flow_and_report(ctx):
     assert (await ctx.client.get(f"{API}/backtests/999", headers=ctx.h)).status_code == 404
 
 
+async def test_get_backtest_never_reports_done_with_empty_metrics(ctx, monkeypatch):
+    """t20: 행을 읽은 직후 잡이 끝나도 status=done + 빈 metrics로 응답하지 않는다."""
+    from quantpilot.api.routes import backtests as rt
+    from quantpilot.db.models import BacktestRow
+
+    row = BacktestRow(
+        strategy="gem",
+        params={},
+        symbols=["SPY"],
+        source="synthetic",
+        unlocked_holdout=False,
+        cost_model={},
+        metrics={},
+        attempt_no=0,
+    )
+    async with ctx.sessions.begin() as s:
+        s.add(row)
+        await s.flush()
+        bid = row.id
+    await ctx.hub.set(hk.backtest(bid), {"status": "running", "progress": 0.5})
+
+    orig = rt.queries.backtest
+
+    async def row_then_job_finishes(sessions, b):
+        r = await orig(sessions, b)
+        # 행을 읽은 직후 잡이 끝나는 경쟁 상황 재현 (run_job 순서: 행 → 허브 done)
+        async with ctx.sessions.begin() as s:
+            (await s.get_one(BacktestRow, b)).metrics = {"cagr": 0.1}
+        await ctx.hub.set(hk.backtest(b), {"status": "done", "progress": 1.0, "done": True})
+        return r
+
+    monkeypatch.setattr(rt.queries, "backtest", row_then_job_finishes)
+    body = (await ctx.client.get(f"{API}/backtests/{bid}", headers=ctx.h)).json()
+    assert body["status"] == "running" and body["metrics"] == {}, body
+    # 다음 조회에서는 done + 채워진 metrics
+    monkeypatch.setattr(rt.queries, "backtest", orig)
+    body = (await ctx.client.get(f"{API}/backtests/{bid}", headers=ctx.h)).json()
+    assert body["status"] == "done" and body["metrics"] == {"cagr": 0.1}
+
+
 async def test_backtest_unlock_holdout_only_once_per_strategy(ctx):
     req = {"strategy": "gem", "source": "synthetic", "unlock_holdout": True, "start": "2021-01-01"}
     r = await ctx.client.post(f"{API}/backtests", json=req, headers=ctx.h)

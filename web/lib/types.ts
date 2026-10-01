@@ -25,11 +25,17 @@ export interface PositionView {
   unrealized: number | null;
 }
 
+export interface TodayPnl {
+  amount: number;
+  pct: number;
+}
+
 export interface Portfolio {
   total_equity_krw: number;
+  today_pnl_krw: number | null;
   total_includes_us: boolean;
   fx: { usdkrw: number | null; source: string | null };
-  by_market: Record<string, { cash: number; equity: number; positions: PositionView[] }>;
+  by_market: Record<string, { cash: number; equity: number; positions: PositionView[]; today_pnl: TodayPnl | null }>;
   month_pnl: Record<string, number | null>;
   month_limit: number;
   halted: Record<string, string | null>;
@@ -157,6 +163,30 @@ export interface Quote {
   price: number;
   orderbook: Orderbook | null;
   strategy: Record<string, unknown> | null;
+  fee_rate: number;
+  tax_rate_sell: number;
+}
+
+export interface EquityPoint {
+  ts: string;
+  v: number;
+}
+
+/** GET /portfolio/equity (ADR 0020 §2). */
+export interface EquityCurve {
+  market: string;
+  days: number;
+  points: EquityPoint[];
+  benchmark: EquityPoint[] | null;
+  source: string;
+}
+
+/** GET /schedule 항목 (ADR 0020 §4). */
+export interface ScheduleItem {
+  name: string;
+  market: string | null;
+  next_action: { at: string; what: string };
+  done: boolean;
 }
 
 export interface RiskRulesView {

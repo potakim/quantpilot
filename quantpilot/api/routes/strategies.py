@@ -7,15 +7,18 @@ allocation 합 ≤ 1, intraday 합 ≤ 0.2 (RiskRules.max_intraday_weight와 같
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from quantpilot.api import gates
+from quantpilot.api import gates, metrics
 from quantpilot.api.auth import require_user
 from quantpilot.api.deps import Deps, DepsDep
 from quantpilot.api.errors import ApiError
+from quantpilot.core import clock
+from quantpilot.core.models import Market
 from quantpilot.execution.risk import RiskRules
 from quantpilot.strategies import REGISTRY, create
 from quantpilot.strategies.base import Strategy
@@ -44,10 +47,54 @@ def _instance(cls: type[Strategy], params: dict[str, Any]) -> Strategy:
         raise ApiError(400, "INVALID_PARAM", str(e), {"params": params}) from None
 
 
-async def _view(deps: Deps, name: str, row: dict[str, Any] | None) -> dict[str, Any]:
+async def _market_stats(
+    deps: Deps, market: Market, rows: dict[str, dict[str, Any]]
+) -> dict[str, dict[str, float | None]]:
+    """시장 하나의 전략별 `{month_pnl, mdd_30d}` (ADR 0020 §3). 체결 조회 1회, 심볼별 봉 조회 1회."""
+    from quantpilot.api.routes.trading import month_start
+    from quantpilot.db.repo import SqlCandleRepo, SqlLedger
+
+    now_utc = deps.utcnow()
+    now = clock.to_local(now_utc, market)
+    fills = await SqlLedger(deps.sessions).fills(market)  # 섀도 원장 제외 (shadow=False)
+    if not fills:
+        return {}
+    month0 = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    start = min(min(f.ts for f in fills), now - timedelta(days=30), month0)
+    candles = SqlCandleRepo(deps.sessions)
+    prices = {}
+    for sym in sorted({f.symbol for f in fills}):
+        closes = metrics.hourly_closes(await candles.load(market, sym, "1m", start, now))
+        if not closes.empty:
+            prices[sym] = closes
+    ms = await month_start(deps, market)
+    if ms and ms.get("month") == f"{now_utc.year:04d}-{now_utc.month:02d}" and ms.get("equity"):
+        base = float(ms["equity"])
+    else:
+        s = deps.settings
+        base = float(s.initial_cash_usd if market == Market.US else s.initial_cash_krw)
+    by: dict[str, list[Any]] = {}
+    for f in fills:
+        by.setdefault(f.strategy, []).append(f)
+    out = {}
+    for name, fs in by.items():
+        alloc = float((rows.get(name) or {}).get("allocation") or 0.0)
+        out[name] = metrics.strategy_stats(fs, prices, alloc * base, month_start=month0, now=now)
+    return out
+
+
+async def _view(
+    deps: Deps,
+    name: str,
+    row: dict[str, Any] | None,
+    stats: dict[str, dict[str, float | None]] | None = None,
+) -> dict[str, Any]:
     from quantpilot.db.repo import SqlPositionRepo
 
     cls = _cls(name)
+    if stats is None:
+        stats = await _market_stats(deps, cls.market, {name: row or {}})
+    st = stats.get(name) or {}
     row = row or {}
     strat = _instance(cls, row.get("params") or {})
     d = strat.describe()
@@ -63,8 +110,8 @@ async def _view(deps: Deps, name: str, row: dict[str, Any] | None) -> dict[str, 
             "paper": bool(row.get("paper", True)),
             "status": {
                 "position": {p.symbol: p.qty for p in positions},
-                "month_pnl": None,  # 전략별 손익 집계는 리포트(P1-11) 몫
-                "mdd_30d": None,
+                "month_pnl": st.get("month_pnl"),
+                "mdd_30d": st.get("mdd_30d"),
             },
             "gate": {"g1": g1},
         }
@@ -78,7 +125,14 @@ async def list_strategies(
 ) -> list[dict[str, Any]]:
     """등록 전략 + 설정 병합."""
     rows = await _rows(deps)
-    return [await _view(deps, n, rows.get(n)) for n in REGISTRY]
+    stats: dict[Market, dict[str, dict[str, float | None]]] = {}
+    out = []
+    for n in REGISTRY:
+        m = REGISTRY[n].market
+        if m not in stats:
+            stats[m] = await _market_stats(deps, m, rows)
+        out.append(await _view(deps, n, rows.get(n), stats[m]))
+    return out
 
 
 @router.get("/strategies/{name}")

@@ -8,6 +8,7 @@ import { useId, useState } from "react";
 import { cx } from "@/components/ui/primitives";
 import { apiFetch, reasonText } from "@/lib/api";
 import { DASH, fmtKrw, fmtPrice, fmtQty, fmtUsd, shortSymbol } from "@/lib/format";
+import { feeRowText } from "@/lib/metrics";
 
 type Side = "buy" | "sell";
 type OType = "market" | "limit";
@@ -20,6 +21,8 @@ export interface OrderPanelProps {
   cash: number | null;
   positionQty: number;
   aiGate: string | null;
+  /** CostModel 편도 수수료율 (GET /quotes의 fee_rate, ADR 0020 §5). */
+  feeRate: number | null;
 }
 
 function parseAmount(s: string): number {
@@ -27,7 +30,7 @@ function parseAmount(s: string): number {
   return Number.isFinite(v) ? v : 0;
 }
 
-export function OrderPanel({ market, symbol, paper, price, cash, positionQty, aiGate }: OrderPanelProps) {
+export function OrderPanel({ market, symbol, paper, price, cash, positionQty, aiGate, feeRate }: OrderPanelProps) {
   const [side, setSide] = useState<Side>("buy");
   const [type, setType] = useState<OType>("market");
   const [amountText, setAmountText] = useState("");
@@ -175,6 +178,10 @@ export function OrderPanel({ market, symbol, paper, price, cash, positionQty, ai
         <div className="flex justify-between">
           <dt>기준가 ({type === "limit" ? "지정가" : "현재가"})</dt>
           <dd className="num text-ink">{fmtPrice(ref, market)}</dd>
+        </div>
+        <div className="flex justify-between">
+          <dt>수수료</dt>
+          <dd className="num text-ink">{feeRowText(feeRate, amount, market)}</dd>
         </div>
         <div className="flex justify-between">
           <dt>{side === "buy" ? "가용 현금" : "보유 수량"}</dt>

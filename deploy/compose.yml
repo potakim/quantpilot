@@ -111,12 +111,17 @@ services:
       redis:
         condition: service_healthy
 
-  # 화면 (P1-13). web/ 이 머지된 뒤 `--profile web`으로 켠다
+  # 화면 (P1-13, ADR 0018). `--profile web`으로 켠다 (scripts/deploy.sh --web)
+  # 서버(라우트 핸들러)는 compose 내부 주소로 api에 붙고, 브라우저 WS는 QP_WS_URL(127.0.0.1 → SSH 터널)로 붙는다.
+  # HTTPS 앞단을 두면 QP_WS_URL을 wss://<도메인>/api/v1/ws 로 바꾼다.
   web:
     profiles: ["web"]
     image: ${QP_WEB_IMAGE:-ghcr.io/potakim/quantpilot-web}:${QP_TAG:-latest}
     build:
       context: ../web
+    environment:
+      QP_API_URL: http://api:8000
+      QP_WS_URL: ${QP_WS_URL:-ws://127.0.0.1:8000/api/v1/ws}
     ports:
       - "127.0.0.1:${QP_WEB_PORT:-3000}:3000"
     restart: unless-stopped

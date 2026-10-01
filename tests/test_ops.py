@@ -93,6 +93,7 @@ def test_compose_env_refs_are_documented():
         "QP_API_PORT",
         "QP_WEB_IMAGE",
         "QP_WEB_PORT",
+        "QP_WS_URL",
     }
     example = (ROOT / ".env.example").read_text(encoding="utf-8")
     for var in refs - optional:
@@ -199,6 +200,34 @@ def test_deploy_dry_run_order(tmp_path):
     assert pos == sorted(pos), r.stdout
     assert all("deploy/compose.yml" in c for c in cmds)
     assert "do-not-print" not in r.stdout + r.stderr
+
+
+@needs_bash
+def test_deploy_dry_run_with_web(tmp_path):
+    env = _env_file(tmp_path)
+    r = subprocess.run(
+        [BASH, str(ROOT / "scripts/deploy.sh"), "--dry-run", "--web", "--env-file", str(env)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    cmds = [ln for ln in r.stdout.splitlines() if ln.startswith("+ ")]
+    assert all("--profile web" in c for c in cmds)
+    api = next(i for i, c in enumerate(cmds) if "--wait api" in c)
+    web = next(i for i, c in enumerate(cmds) if c.endswith("--no-deps web"))
+    sched = next(i for i, c in enumerate(cmds) if c.endswith("scheduler"))
+    assert api < web < sched
+
+
+def test_web_image_takes_api_url_at_runtime(compose):
+    """web 이미지에는 API 주소·키가 없고, compose가 실행 시 넣는다 (ADR 0018·0019)."""
+    env = compose["services"]["web"]["environment"]
+    assert env["QP_API_URL"] == "http://api:8000"
+    assert env["QP_WS_URL"].startswith("${QP_WS_URL:-ws://127.0.0.1:")
+    dockerfile = (ROOT / "web" / "Dockerfile").read_text(encoding="utf-8")
+    assert not re.search(r"^\s*(ENV|ARG)\s+(QP_|NEXT_PUBLIC_)", dockerfile, re.MULTILINE)
+    assert re.search(r"^USER\s+node", dockerfile, re.MULTILINE)
+    assert ".env*" in (ROOT / "web" / ".dockerignore").read_text(encoding="utf-8").splitlines()
 
 
 @needs_bash

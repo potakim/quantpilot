@@ -1,0 +1,10 @@
+# web 이미지에 들어가면 안 되는 것 (ADR 0019)
+node_modules/
+.next/
+out/
+coverage/
+.lighthouseci/
+.env*
+tests/
+lighthouse/
+*.tsbuildinfo

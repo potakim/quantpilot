@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # QuantPilot paper 배포 (docs/07 §2, ADR 0019)
 #
-#   scripts/deploy.sh [--tag TAG] [--build] [--force] [--dry-run] [--env-file PATH]
+#   scripts/deploy.sh [--tag TAG] [--web] [--build] [--force] [--dry-run] [--env-file PATH]
 #
-# 순서: 이미지 pull(또는 build) → db·redis → migrate(alembic upgrade head) → api → scheduler → engine
+# 순서: 이미지 pull(또는 build) → db·redis → migrate(alembic upgrade head) → api → (web) → scheduler → engine
 # engine은 열린 포지션이 없고 KRX 장중(KST 09:05~15:15)이 아닐 때만 재시작한다.
 # 걸리면 api·scheduler까지만 갱신하고 멈춘다 — 그래도 진행하려면 --force.
 # 롤백은 이전 태그로 다시 실행: scripts/deploy.sh --tag <이전 sha>
@@ -13,6 +13,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${QP_ENV_FILE:-/opt/quantpilot/.env}"
 TAG="${QP_TAG:-latest}"
 BUILD=0
+WEB=0
 FORCE=0
 DRY_RUN=0
 
@@ -25,6 +26,7 @@ while [[ $# -gt 0 ]]; do
     --tag) TAG="$2"; shift 2 ;;
     --env-file) ENV_FILE="$2"; shift 2 ;;
     --build) BUILD=1; shift ;;
+    --web) WEB=1; shift ;;
     --force) FORCE=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -43,6 +45,9 @@ fi
 
 export QP_TAG="$TAG" QP_ENV_FILE="$ENV_FILE"
 COMPOSE=(docker compose -f "$ROOT/deploy/compose.yml" --env-file "$ENV_FILE")
+if [[ "$WEB" -eq 1 ]]; then
+  COMPOSE+=(--profile web)
+fi
 
 run() {
   echo "+ $*"
@@ -70,6 +75,11 @@ run "${COMPOSE[@]}" run --rm migrate
 
 step "api"
 run "${COMPOSE[@]}" up -d --no-deps --wait api
+
+if [[ "$WEB" -eq 1 ]]; then
+  step "web"
+  run "${COMPOSE[@]}" up -d --no-deps web
+fi
 
 step "scheduler"
 run "${COMPOSE[@]}" up -d --no-deps scheduler

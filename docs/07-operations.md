@@ -35,6 +35,7 @@ curl -s 127.0.0.1:8000/api/v1/health             # ok·paper=true·engine_alive 
 - db·redis는 호스트 포트가 없고 api는 `127.0.0.1:8000`에만 열린다. 밖에서 볼 때는 `ssh -L 8000:127.0.0.1:8000 vps` 또는 HTTPS 앞단(후속 카드).
 - 업데이트: `app/scripts/deploy.sh --tag <커밋 sha>`(기본 `latest`). engine 재시작 전 가드가 열린 포지션·KRX 장중(평일 KST 09:05~15:15)을 확인하고, 걸리면 api·scheduler까지만 갱신한 뒤 멈춘다. 그래도 진행하려면 `--force`.
 - 이미지를 VPS에서 직접 만들 때는 `--build`.
+- 화면(web, P1-13)까지 띄우려면 `--web`. web은 `127.0.0.1:3000`에 열리고, 브라우저 WS는 `QP_WS_URL`(기본 `ws://127.0.0.1:8000/api/v1/ws`)로 api에 직접 붙으므로 SSH 터널은 두 포트 모두 연다: `ssh -L 3000:127.0.0.1:3000 -L 8000:127.0.0.1:8000 vps`. HTTPS 앞단을 둔 뒤에는 env 파일에 `QP_WS_URL=wss://<도메인>/api/v1/ws`.
 
 ### 2.2 백업·복원
 

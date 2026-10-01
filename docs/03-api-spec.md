@@ -39,7 +39,7 @@ FastAPI, base `/api/v1`. 인증은 `Authorization: Bearer <JWT>` (단일 사용�
 
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
-| GET | `/strategies` | 등록 전략 + 설정 병합: `[{name, market, timeframe, horizon, symbols, params, schema, enabled, allocation, paper, status:{position, month_pnl, mdd_30d}, gate:{...}}]` |
+| GET | `/strategies` | 등록 전략 + 설정 병합: `[{name, market, timeframe, horizon, symbols, params, schema, enabled, allocation, paper, status:{position, month_pnl, mdd_30d}, gate:{...}}]`. `month_pnl`은 월초(시장 현지) 이후 전략 손익률, `mdd_30d`는 최근 30일 최대 낙폭(양수 비율). 전략 체결 재생 + 1시간 종가 평가, 자본 기준은 allocation × 월초 평가액(없으면 초기 자금). 해당 기간 체결이나 시세가 없으면 null (ADR 0020) |
 | GET | `/strategies/{name}` | 단일 |
 | PATCH | `/strategies/{name}` | `{enabled?, params?, allocation?, symbols?}` — params는 ParamSpec 검증, allocation 합 ≤ 1, intraday 합 ≤ 0.2 |
 | POST | `/strategies/{name}/reset-params` | 기본값 복원 |
@@ -61,14 +61,16 @@ FastAPI, base `/api/v1`. 인증은 `Authorization: Bearer <JWT>` (단일 사용�
 
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
-| GET | `/portfolio` | `{total_equity_krw, by_market:{upbit:{cash,equity,positions:[...]}, krx:..., us:...}, month_pnl, month_limit, halted:{...}}` (USD는 환율 환산, 환율 출처 명시) |
+| GET | `/portfolio` | `{total_equity_krw, today_pnl_krw, by_market:{upbit:{cash,equity,positions:[...], today_pnl:{amount,pct}\|null}, krx:..., us:...}, month_pnl, month_limit, halted:{...}}` (USD는 환율 환산, 환율 출처 명시). `today_pnl` = 현재 평가액 − 시장 현지 자정 이후 첫 `equity_snapshots` 값, 오늘 스냅샷이 없으면 null. `today_pnl_krw`는 값이 있는 시장의 합(미국은 환율이 있을 때만), 하나도 없으면 null (ADR 0020) |
+| GET | `/portfolio/equity?market=upbit&days=30` | 자산 곡선 `{market, days, points:[{ts,v}], benchmark:[{ts,v}]\|null, source:"equity_snapshots"}`. days ∈ {30, 90, 365}(그 밖은 400 `INVALID_PARAM`). 30일은 1시간당, 90·365일은 하루당 마지막 값 1개. benchmark는 같은 시작 자본으로 BTC(KRW-BTC)를 들고만 있었을 때(업비트만, 봉이 없으면 null). 스냅샷이 없으면 `points: []` |
+| GET | `/schedule` | 오늘(KST) 예약 작업 `[{name, market, next_action:{at, what}, done}]` — scheduler 잡 표(JOBS)의 cron에서 계산한 오늘 실행 시각(UTC ISO), 이미 지난 것은 `done:true`. 변동성 돌파는 1분봉으로 계산한 오늘 목표가를 함께 싣는다(봉이 없으면 "목표가 계산 불가"). 읽기 전용 (ADR 0020) |
 | GET | `/positions?market=` | 포지션 목록 + 전략·손절가·미실현 |
 | GET | `/orders?market=&status=&limit=` | 주문 목록 |
 | GET | `/fills?market=&strategy=&from=&to=` | 원장 |
 | POST | `/orders` | 수동 주문 `{market, symbol, side, qty|amount, type, limit_price?, stop?}` → RiskManager 통과 시 201 `{order(status=queued), risk}`, 거부 시 422(할트 중 409 `HALTED`). **수동 주문도 리스크 게이트를 탄다** — api는 사전 검사 후 주문 큐에 넣고 엔진이 OrderExecutor로 다시 검사·실행한다 (ADR 0017) |
 | DELETE | `/orders/{id}` | 미체결 취소 |
 | POST | `/positions/{market}/{symbol}/close` | 시장가 청산 (리스크 게이트의 exit 경로) |
-| GET | `/quotes/{market}/{symbol}` | 현재가·호가 5단계·전략 상태(목표가, 이평 스코어) |
+| GET | `/quotes/{market}/{symbol}` | 현재가·호가 5단계·전략 상태(목표가, 이평 스코어) + 비용 `fee_rate`(편도 수수료율)·`tax_rate_sell`(매도 세율) — 백테스터·PaperBroker와 같은 CostModel 프리셋 (ADR 0020) |
 | GET | `/candles/{market}/{symbol}?tf=5m&limit=500&before=` | 캔들 |
 
 ### 2.5 AI 판단
@@ -114,8 +116,8 @@ FastAPI, base `/api/v1`. 인증은 `Authorization: Bearer <JWT>` (단일 사용�
 
 | 화면 | 사용 API |
 | --- | --- |
-| 대시보드 | `/portfolio`, `/strategies`, `/judgments?limit=5`, `/reports/gates`, WS `portfolio`·`judgments`·`strategy.status` |
-| 거래·차트 | `/quotes`, `/candles`, `/orders`, `/positions`, `/judgments?symbol=`, POST `/orders`, WS `ticks`·`orderbook`·`fills` |
+| 대시보드 | `/portfolio`(오늘 손익 `today_pnl_krw`), `/portfolio/equity`(자산 곡선 30/90/365일), `/schedule`(오늘 일정), `/strategies`(이번 달·MDD), `/judgments?limit=5`, `/reports/gates`, WS `portfolio`·`judgments`·`strategy.status`(일정은 REST `/schedule`에 WS 항목을 덧붙인다) |
+| 거래·차트 | `/quotes`(주문 패널 수수료 행 `fee_rate`), `/candles`, `/orders`, `/positions`, `/judgments?symbol=`, POST `/orders`, WS `ticks`·`orderbook`·`fills` |
 | 전략 설정 | `/strategies`, PATCH, `/backtests?strategy=`, `/reports/gates`, `/settings` |
 | AI 판단 로그 | `/judgments`, `/judgments/{id}`, `/judgments/calibration`, `/judgments/ab`, POST `/ask` |
 | 백테스트 | POST `/backtests`, GET `/backtests/{id}`, WS `backtest:{id}` |

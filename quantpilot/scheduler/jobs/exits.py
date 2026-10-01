@@ -8,12 +8,15 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from collections.abc import Sequence
+from datetime import datetime, timedelta
+from typing import Any
 
 from quantpilot.core.clock import MarketClock, to_local
 from quantpilot.core.models import Market
 from quantpilot.scheduler.context import JobContext, run_hook
 from quantpilot.strategies import create
+from quantpilot.strategies.base import Strategy
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +51,33 @@ async def time_exit(ctx: JobContext, market: Market, strategy: str) -> None:
     await run_backup_exit(ctx, market, strategy, cmd_id)
 
 
+def breakout_target(sym: str, bars: Sequence[Any], k: float) -> dict[str, Any] | None:
+    """1분봉(전일 09:00~당일 09:00)으로 목표가 1건. 봉이 없으면 None (순수 함수).
+
+    목표가 = 오늘 시가 + (전일 고가 − 전일 저가) × K (05 §1). 오늘 시가는 09:00 직전 마지막 종가로 근사한다.
+    """
+    if not bars:
+        return None
+    rng = max(b.high for b in bars) - min(b.low for b in bars)
+    open_ref = bars[-1].close
+    return {"symbol": sym, "open": open_ref, "range": rng, "target": open_ref + rng * k}
+
+
+async def breakout_targets(
+    candles: Any, today9: datetime
+) -> tuple[Strategy, float, list[dict[str, Any]]]:
+    """today9(현지 09:00) 기준 vol_breakout 심볼별 목표가. 봉 없는 심볼은 뺀다 (읽기 전용)."""
+    strat = create("vol_breakout")
+    k = float(strat.params["k"])
+    targets = []
+    for sym in strat.symbols:
+        bars = await candles.load(Market.UPBIT, sym, "1m", today9 - timedelta(days=1), today9)
+        t = breakout_target(sym, bars, k)
+        if t is not None:
+            targets.append(t)
+    return strat, k, targets
+
+
 async def publish_breakout_status(ctx: JobContext) -> None:
     """vol_breakout 오늘 목표가를 계산해 `strategy.status`로 발행한다.
 
@@ -56,19 +86,8 @@ async def publish_breakout_status(ctx: JobContext) -> None:
     """
     if ctx.candles is None:
         return
-    strat = create("vol_breakout")
-    k = float(strat.params["k"])
     today9 = to_local(ctx.utcnow(), Market.UPBIT).replace(hour=9, minute=0, second=0, microsecond=0)
-    targets = []
-    for sym in strat.symbols:
-        bars = await ctx.candles.load(Market.UPBIT, sym, "1m", today9 - timedelta(days=1), today9)
-        if not bars:
-            continue
-        rng = max(b.high for b in bars) - min(b.low for b in bars)
-        open_ref = bars[-1].close
-        targets.append(
-            {"symbol": sym, "open": open_ref, "range": rng, "target": open_ref + rng * k}
-        )
+    strat, k, targets = await breakout_targets(ctx.candles, today9)
     await ctx.bus.publish(
         "strategy.status",
         {

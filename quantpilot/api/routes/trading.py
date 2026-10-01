@@ -18,11 +18,12 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from quantpilot.api import queries
+from quantpilot.api import metrics, queries
 from quantpilot.api.auth import require_user
 from quantpilot.api.deps import Deps, DepsDep
 from quantpilot.api.errors import ApiError
 from quantpilot.api.routes.system import halted_map, link_of
+from quantpilot.backtest.costs import preset
 from quantpilot.core import clock
 from quantpilot.core.models import Market, Order, OrderType, Side
 from quantpilot.execution.risk import RiskDecision, RiskManager, RiskRules
@@ -86,18 +87,22 @@ def _account_equity(acct: Any) -> float:
 async def portfolio(
     deps: DepsDep,
 ) -> dict[str, Any]:
-    """시장별 현금·평가액·포지션, 월 손익, 월 한도, 할트."""
-    from quantpilot.db.repo import SqlConfigRepo
+    """시장별 현금·평가액·포지션·오늘 손익, 월 손익, 월 한도, 할트."""
+    from quantpilot.db.repo import SqlConfigRepo, SqlOpsRepo
 
+    ops = SqlOpsRepo(deps.sessions)
+    now = deps.utcnow()
     by: dict[str, Any] = {}
     month_pnl: dict[str, float | None] = {}
     for m in Market:
         acct = await deps.account(m)
         eq = _account_equity(acct)
+        since = metrics.day_start(now, m)
         by[m.value] = {
             "cash": float(acct.cash()),
             "equity": eq,
             "positions": [queries_position(p) for p in acct.positions().values()],
+            "today_pnl": metrics.today_pnl(eq, await ops.equity_snapshots_since(m, since)),
         }
         ms = await month_start(deps, m)
         month_pnl[m.value] = eq / float(ms["equity"]) - 1 if ms and ms.get("equity") else None
@@ -108,12 +113,57 @@ async def portfolio(
     total = krw + by["us"]["equity"] * float(fx) if fx else None
     return {
         "total_equity_krw": total if total is not None else krw,
+        "today_pnl_krw": _today_pnl_krw(by, fx),
         "total_includes_us": fx is not None,
         "fx": {"usdkrw": fx, "source": "hub fx:usdkrw / settings fx.usdkrw" if fx else None},
         "by_market": by,
         "month_pnl": month_pnl,
         "month_limit": RiskRules().monthly_loss_limit,
         "halted": await halted_map(deps),
+    }
+
+
+def _today_pnl_krw(by: dict[str, Any], fx: Any) -> float | None:
+    """시장별 오늘 손익 합(원). 미국은 환율이 있을 때만 더한다. 하나도 없으면 None."""
+    parts = []
+    for m, rate in (("upbit", 1.0), ("krx", 1.0), ("us", float(fx) if fx else None)):
+        t = by[m]["today_pnl"]
+        if t is not None and rate is not None:
+            parts.append(t["amount"] * rate)
+    return sum(parts) if parts else None
+
+
+@router.get("/portfolio/equity")
+async def portfolio_equity(
+    deps: DepsDep,
+    market: str = "upbit",
+    days: int = 30,
+) -> dict[str, Any]:
+    """자산 곡선(equity_snapshots, 1시간/하루 묶음) + BTC 보유 벤치마크 (ADR 0020 §2)."""
+    from quantpilot.db.repo import SqlCandleRepo, SqlOpsRepo
+
+    m = _market(market)
+    if days not in metrics.EQUITY_DAYS:
+        raise ApiError(400, "INVALID_PARAM", f"days는 {list(metrics.EQUITY_DAYS)} 중 하나")
+    end = clock.to_local(deps.utcnow(), m)
+    start = end - timedelta(days=days)
+    snaps = await SqlOpsRepo(deps.sessions).equity_snapshots_since(m, start, end)
+    points = metrics.downsample(snaps, days)
+    bench = None
+    sym = metrics.BENCHMARK_SYMBOL.get(m)
+    if sym and not points.empty:
+        repo = SqlCandleRepo(deps.sessions)
+        bars = await repo.load(m, sym, "1m", start - timedelta(days=1), end)
+        closes = pd.Series([b.close for b in bars], index=pd.DatetimeIndex([b.ts for b in bars]))
+        vals = metrics.benchmark(points, closes) if bars else None
+        if vals is not None:
+            bench = metrics.series_points(pd.Series(vals, index=points.index), m)
+    return {
+        "market": m.value,
+        "days": days,
+        "points": metrics.series_points(points, m),
+        "benchmark": bench,
+        "source": "equity_snapshots",
     }
 
 
@@ -332,12 +382,15 @@ async def quote(
     price = await price_of(deps, m, symbol)
     if price is None:
         raise ApiError(409, "NO_PRICE", f"시세 없음: {symbol}")
+    cost = preset(m)
     return {
         "market": m.value,
         "symbol": symbol,
         "price": price,
         "orderbook": await deps.hub.get(hk.ob(m, symbol)),
         "strategy": await deps.hub.get(hk.strategy_state(m, symbol)),
+        "fee_rate": cost.fee_rate,
+        "tax_rate_sell": cost.sell_tax_rate,
     }
 
 

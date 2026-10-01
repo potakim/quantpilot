@@ -150,6 +150,7 @@ export function TradeView({ market, symbol }: { market: string; symbol: string }
           cash={portfolio.data?.by_market[market]?.cash ?? null}
           positionQty={positionQty}
           aiGate={latest?.gate ?? null}
+          feeRate={quote.data?.fee_rate ?? null}
         />
       </div>
     </div>

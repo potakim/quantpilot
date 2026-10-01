@@ -7,6 +7,7 @@ import { apiFetch } from "@/lib/api";
 import type {
   AbReport,
   Calibration,
+  EquityCurve,
   FillRow,
   Gates,
   Health,
@@ -18,6 +19,7 @@ import type {
   PositionView,
   Quote,
   RiskEventRow,
+  ScheduleItem,
   SettingsView,
   StrategyView,
 } from "@/lib/types";
@@ -36,6 +38,16 @@ export const useHealth = () =>
 
 export const usePortfolio = () =>
   useQuery({ queryKey: ["portfolio"], queryFn: () => apiFetch<Portfolio>("/portfolio"), refetchInterval: 30_000 });
+
+export const useEquityCurve = (market: string, days: 30 | 90 | 365) =>
+  useQuery({
+    queryKey: ["equity", market, days],
+    queryFn: () => apiFetch<EquityCurve>(`/portfolio/equity${qs({ market, days })}`),
+    staleTime: 60_000,
+  });
+
+export const useSchedule = () =>
+  useQuery({ queryKey: ["schedule"], queryFn: () => apiFetch<ScheduleItem[]>("/schedule"), refetchInterval: 60_000 });
 
 export const useStrategies = () =>
   useQuery({ queryKey: ["strategies"], queryFn: () => apiFetch<StrategyView[]>("/strategies") });

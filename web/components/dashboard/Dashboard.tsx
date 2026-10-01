@@ -1,6 +1,6 @@
 "use client";
 
-// 대시보드 (Main.dc.html, 모바일은 Mobile.dc.html). 숫자는 전부 API 응답이고, API가 아직 주지 않는 값은 "—"로 둔다.
+// 대시보드 (Main.dc.html, 모바일은 Mobile.dc.html). 숫자는 전부 API 응답이고, 값이 없으면 "—"로 둔다 (ADR 0020, lib/metrics.ts).
 import Link from "next/link";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
@@ -12,9 +12,19 @@ import { KpiCard } from "@/components/ui/KpiCard";
 import { Toggle } from "@/components/ui/Toggle";
 import { Badge, Card, CardSkeleton, EmptyNote, ErrorNote, Segmented, cx } from "@/components/ui/primitives";
 import { apiFetch, reasonText } from "@/lib/api";
-import { DASH, fmtKrw, fmtNumber, fmtPct, fmtQty, fmtUsd, kstDayStartIso, kstTime, shortSymbol, toneOf } from "@/lib/format";
+import { DASH, fmtKrw, fmtNumber, fmtQty, fmtUsd, kstDayStartIso, kstTime, shortSymbol, toneOf } from "@/lib/format";
 import { STRATEGY_TITLE, marketLabel, strategyLabel } from "@/lib/labels";
-import { useFills, useGates, useHealth, useJudgments, usePortfolio, useStrategies } from "@/lib/queries";
+import { curvePaths, scheduleRows, strategyMddText, strategyMonthText, todayPnlView } from "@/lib/metrics";
+import {
+  useEquityCurve,
+  useFills,
+  useGates,
+  useHealth,
+  useJudgments,
+  usePortfolio,
+  useSchedule,
+  useStrategies,
+} from "@/lib/queries";
 import type { JudgmentRow, Portfolio, StrategyView } from "@/lib/types";
 import { useUi } from "@/lib/ui-store";
 import { useLive } from "@/lib/ws";
@@ -80,6 +90,7 @@ function KpiRow() {
   const fees = todayFills.reduce((a, f) => a + f.fee + f.tax, 0);
   const paperOnly = list.filter((s) => s.paper && !paper).map((s) => strategyLabel(s.name));
   const g2 = gates.data?.g2.pass;
+  const pnl = todayPnlView(p);
   return (
     <div className="grid grid-cols-4 gap-4">
       <KpiCard
@@ -93,7 +104,15 @@ function KpiRow() {
       />
       <KpiCard
         label="오늘 손익"
-        value={<span title="오늘 손익 집계 API가 아직 없습니다">{DASH}</span>}
+        value={
+          <span
+            className={TONE_TEXT[pnl.tone]}
+            title={pnl.value === DASH ? "오늘(시장 자정 이후) 평가액 스냅샷이 아직 없습니다" : undefined}
+          >
+            {pnl.value}
+          </span>
+        }
+        unit={pnl.pct === DASH ? undefined : pnl.pct}
         sub={`체결 ${todayFills.length}건 · 수수료 ${fmtKrw(fees)}`}
       />
       <KpiCard
@@ -124,8 +143,13 @@ function KpiRow() {
   );
 }
 
+const CURVE_W = 600;
+const CURVE_H = 200;
+
 function EquityCurveCard() {
   const [range, setRange] = useState<"30" | "90" | "365">("30");
+  const curve = useEquityCurve("upbit", Number(range) as 30 | 90 | 365);
+  const paths = curvePaths(curve.data?.points ?? [], curve.data?.benchmark, CURVE_W, CURVE_H);
   return (
     <Card className="flex flex-col gap-3 p-5">
       <div className="flex items-center justify-between">
@@ -146,7 +170,49 @@ function EquityCurveCard() {
         />
       </div>
       <div className="flex h-[212px] items-center justify-center">
-        <EmptyNote>자산 곡선 시계열은 아직 API가 제공하지 않습니다. 값이 생기면 이 자리에 그립니다.</EmptyNote>
+        {curve.isLoading ? (
+          <CardSkeleton lines={3} className="w-full border-0 p-0" />
+        ) : curve.isError ? (
+          <ErrorNote>자산 곡선을 불러오지 못했습니다: {reasonText(curve.error)}</ErrorNote>
+        ) : paths ? (
+          <figure className="flex h-full w-full flex-col gap-1">
+            <svg
+              viewBox={`0 0 ${CURVE_W} ${CURVE_H}`}
+              preserveAspectRatio="none"
+              role="img"
+              aria-label={`자산 곡선: ${fmtKrw(paths.min)} ~ ${fmtKrw(paths.max)}`}
+              className="h-[190px] w-full"
+            >
+              {paths.bench ? (
+                <polyline
+                  points={paths.bench}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                  strokeDasharray="4 4"
+                  vectorEffect="non-scaling-stroke"
+                  className="text-bench"
+                />
+              ) : null}
+              <polyline
+                points={paths.main}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                vectorEffect="non-scaling-stroke"
+                className="text-ai"
+              />
+            </svg>
+            <figcaption className="flex justify-between text-[11px] text-muted">
+              <span className="num">
+                {fmtKrw(paths.min)} ~ {fmtKrw(paths.max)}
+              </span>
+              <span>{paths.bench ? "실선 전략 합산 · 점선 BTC 보유" : "BTC 보유 비교값 없음 (봉 없음)"}</span>
+            </figcaption>
+          </figure>
+        ) : (
+          <EmptyNote>아직 쌓인 평가액 스냅샷이 없습니다. scheduler가 1분마다 기록하면 이 자리에 그립니다.</EmptyNote>
+        )}
       </div>
     </Card>
   );
@@ -154,23 +220,21 @@ function EquityCurveCard() {
 
 function ScheduleCard() {
   const statuses = useLive((s) => s.strategyStatus);
-  const items = Object.values(statuses)
-    .filter((s) => s.next_action?.at)
-    .sort((a, b) => String(a.next_action!.at).localeCompare(String(b.next_action!.at)));
+  const schedule = useSchedule();
   const now = Date.now();
+  const items = scheduleRows(schedule.data, Object.values(statuses), now);
   return (
     <Card className="flex flex-col gap-3.5 p-5">
       <h2 className="text-[15px] font-semibold">오늘 일정 (KST)</h2>
       {items.length ? (
         <ol className="flex flex-col gap-3">
           {items.map((s, i) => {
-            const at = Date.parse(String(s.next_action!.at));
-            const done = at < now;
-            const next = !done && items.findIndex((x) => Date.parse(String(x.next_action!.at)) >= now) === i;
+            const done = s.done;
+            const next = !done && items.findIndex((x) => !x.done) === i;
             return (
-              <li key={s.name} className="flex items-start gap-3">
+              <li key={s.key} className="flex items-start gap-3">
                 <span className={cx("num w-12 text-[13px]", next ? "font-semibold text-ink" : "text-muted")}>
-                  {kstTime(s.next_action!.at)}
+                  {kstTime(s.at)}
                 </span>
                 <span
                   aria-hidden="true"
@@ -180,7 +244,7 @@ function ScheduleCard() {
                   )}
                 />
                 <div className="flex flex-col gap-0.5">
-                  <div className="text-[13px] font-medium">{s.next_action!.what ?? DASH}</div>
+                  <div className="text-[13px] font-medium">{s.what}</div>
                   <div className="text-xs text-muted">
                     {strategyLabel(s.name)} · {done ? "완료" : next ? "다음" : "예정"}
                   </div>
@@ -190,7 +254,9 @@ function ScheduleCard() {
           })}
         </ol>
       ) : (
-        <EmptyNote>예정 작업은 엔진이 strategy.status 채널로 알려 줄 때 표시됩니다. 아직 받은 일정이 없습니다.</EmptyNote>
+        <EmptyNote>
+          {schedule.isError ? `일정을 불러오지 못했습니다: ${reasonText(schedule.error)}` : "오늘 남은 예약 작업이 없습니다."}
+        </EmptyNote>
       )}
     </Card>
   );
@@ -260,8 +326,8 @@ function StrategyTable() {
                     />
                   </td>
                   <td className={Object.keys(s.status.position ?? {}).length ? "" : "text-muted"}>{positionText(s)}</td>
-                  <td className={cx("num", TONE_TEXT[toneOf(s.status.month_pnl)])}>{fmtPct(s.status.month_pnl)}</td>
-                  <td className="num text-muted">{fmtPct(s.status.mdd_30d == null ? null : -Math.abs(s.status.mdd_30d))}</td>
+                  <td className={cx("num", TONE_TEXT[toneOf(s.status.month_pnl)])}>{strategyMonthText(s.status.month_pnl)}</td>
+                  <td className="num text-muted">{strategyMddText(s.status.mdd_30d)}</td>
                 </tr>
               );
             })}
@@ -352,7 +418,7 @@ function MobileDashboard() {
                   {marketLabel(s.market)} · {positionText(s)}
                 </span>
               </div>
-              <span className={cx("num text-xs", TONE_TEXT[toneOf(s.status.month_pnl)])}>{fmtPct(s.status.month_pnl)}</span>
+              <span className={cx("num text-xs", TONE_TEXT[toneOf(s.status.month_pnl)])}>{strategyMonthText(s.status.month_pnl)}</span>
               <Toggle
                 size="lg"
                 checked={s.enabled}

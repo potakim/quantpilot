@@ -441,6 +441,28 @@ class SqlOpsRepo:
             rows = (await s.scalars(q.order_by(EquitySnapshotRow.ts))).all()
         return [_row_dict(r) for r in rows]
 
+    async def equity_snapshots_since(
+        self, market: Market, since: datetime, until: datetime | None = None
+    ) -> list[dict[str, Any]]:
+        """[since, until) 평가액 스냅샷(시간순). 입출력 시각은 시장 현지 tz-naive (읽기 전용)."""
+        q = select(EquitySnapshotRow).where(
+            EquitySnapshotRow.market == Market(market).value,
+            EquitySnapshotRow.ts >= to_db_ts(since, market),
+        )
+        if until is not None:
+            q = q.where(EquitySnapshotRow.ts < to_db_ts(until, market))
+        async with self._sessions() as s:
+            rows = (await s.scalars(q.order_by(EquitySnapshotRow.ts))).all()
+        return [
+            {
+                "ts": from_db_ts(r.ts, market),
+                "cash": float(r.cash),
+                "equity": float(r.equity),
+                "paper": r.paper,
+            }
+            for r in rows
+        ]
+
 
 def _row_dict(row: Any) -> dict[str, Any]:
     return {c.key: getattr(row, c.key) for c in row.__mapper__.column_attrs}

@@ -24,7 +24,15 @@ from quantpilot import __version__
 from quantpilot.api import errors
 from quantpilot.api.auth import Auth
 from quantpilot.api.deps import AccountSource, Answerer, CalibrationSource, Deps, StubAnswerer
-from quantpilot.api.routes import backtests, judgments, reports, strategies, system, trading
+from quantpilot.api.routes import (
+    backtests,
+    judgments,
+    reports,
+    schedule,
+    strategies,
+    system,
+    trading,
+)
 from quantpilot.api.ws import WsHub
 from quantpilot.api.ws import router as ws_router
 from quantpilot.core.ports import Hub
@@ -122,6 +130,7 @@ def create_app(
         trading.router,
         judgments.router,
         reports.router,
+        schedule.router,
         ws_router,
     ):
         app.include_router(r, prefix=PREFIX)

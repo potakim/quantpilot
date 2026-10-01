@@ -58,7 +58,7 @@
 
 - **숫자는 전부 모노스페이스 + `font-variant-numeric: tabular-nums`**. 가격·손익·확신도·시각 모두.
 - 보라(`--ai`)는 AI 판단 관련 요소에만 쓴다: 확신도 바, 판단 카드 테두리, "AI 권장" 버튼, 강조색. 다른 곳에 보라를 쓰지 않는다.
-- 주황(`--warn`)은 "사람이 확인해야 할 상태": 페이퍼 모드 배지, 보류, 관문 미달, 월 손실 게이지, 과최적화 경고.
+- 주황(`--warn`)은 "사람이 확인해야 할 상태": 페이퍼 모드 배지, 보류, 관문 미달, 월 손실 게이지(60% 이상일 때), 과최적화 경고.
 - 초록(`--ok`)은 시스템 상태(연결됨, ON, 승인)에만. 수익에는 쓰지 않는다(수익은 빨강).
 - 카드는 `--bg-2` + `1px solid --line` + `--r-card`, 패딩 18~20px. 카드 안의 강조 블록은 `--bg-3` + `--r-block`, 패딩 10~12px.
 - 그라디언트·그림자·이모지 없음. 아이콘은 인라인 stroke SVG(1.8px, round cap), 18px(내비) / 14~16px(인라인).
@@ -83,7 +83,7 @@
 ```
 
 - 헤더의 **모드 배지**(페이퍼/실전)와 **연결 상태**는 모든 화면에 항상 보인다. 실전 모드는 배지가 빨강 계열(`--up-bg`/`--up`)로 바뀐다.
-- 사이드바 하단 **월 손실 한도 카드**는 모든 화면에 고정. 게이지는 `−1.2% / 한도 −5%` 형식, 색은 24% 이하 초록 → 60% 주황 → 100% 빨강.
+- 사이드바 하단 **월 손실 한도 카드**는 모든 화면에 고정. 게이지는 `−1.2% / 한도 −5%` 형식, 색은 사용률(|월 손익| ÷ |한도|) 24% 이하 초록 → 60%까지 주황 → 그 이상 빨강(ADR 0018). 월 손익이 플러스면 사용률 0%.
 - 활성 내비 항목: `--bg-3` 배경 + `--ink`, 나머지 `--muted`.
 
 ## 4. 화면별 구성과 상태
@@ -138,3 +138,5 @@ ORB 카드는 `--warn-line` 테두리 + 관문 G2 진행률 바 + "실전 전환
 ## 6. 프론트 스택
 
 Next.js 15 App Router + TypeScript, Tailwind(토큰은 위 CSS 변수로 `theme.extend`), TradingView Lightweight Charts, 상태는 WebSocket 스트림을 구독하는 zustand 스토어, 데이터 fetch는 TanStack Query. 컴포넌트 라이브러리 없이 아트보드의 마크업을 그대로 컴포넌트화한다(`components/ui/{Card, Badge, Toggle, KpiCard, ConfidenceBar, JudgmentCard, OrderPanel, ...}`).
+
+인증·도구 배치(ADR 0018): JWT는 Next.js 라우트 핸들러가 심는 httpOnly 쿠키에만 두고, 브라우저 REST 호출은 같은 출처 프록시(`web/app/api/qp/[...path]`)가 `Authorization`을 서버 쪽에서 붙여 넘긴다. WS 토큰은 `/api/session/ws-token`에서 받아 메모리에만 둔다. Node 도구는 `web/` 안에만 있고 CI는 별도 `web` 잡으로 돌린다. 접근성(Lighthouse 90+)은 `scripts/web_demo_api.py` 데모 API를 상대로 CI에서 잰다.

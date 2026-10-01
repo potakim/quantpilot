@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 디자인 토큰 — docs/10-ui-design.md §2 (아트보드에서 추출). */
+:root {
+  /* 배경 */
+  --bg-0: #0b0f14; /* 페이지 */
+  --bg-1: #0f141b; /* 헤더·사이드바 */
+  --bg-2: #121820; /* 카드 */
+  --bg-3: #1a222c; /* 카드 안 강조 블록, 선택된 탭 */
+  --bg-4: #2a3442; /* 비활성 토글, 거래량 바 */
+  --line: #253040; /* 테두리 */
+  --line-2: #1e2734; /* 표 행 구분, 차트 그리드 */
+
+  /* 텍스트 */
+  --ink: #e8edf3;
+  --ink-2: #c5cdd8;
+  --muted: #8a96a6;
+  --muted-2: #5c6878; /* 차트 축 라벨 전용 (11px 이상) */
+
+  /* 의미색 (국내 관행: 상승 빨강 · 하락 파랑) */
+  --up: #f4516c;
+  --up-bg: #3a1b26;
+  --down: #4f8cff;
+  --down-bg: #1b2a44;
+  --ok: #2ecc8a;
+  --ok-ink: #6ee7b7;
+  --ok-bg: #123626;
+  --warn: #f5a524;
+  --warn-ink: #f5c57a;
+  --warn-bg: #2a2110;
+  --warn-bg-2: #3a2410; /* LLM 보류 배지 (아트보드) */
+  --warn-line: #7a5a14;
+  --ai: #8b7cf6;
+  --ai-ink: #c4b8ff;
+  --ai-bg: #241f45;
+  --ai-line: #2e2a4d;
+  --ai-line-2: #3a3466; /* AI 판단 패널 테두리 (아트보드) */
+  --bench: #4a5566; /* 벤치마크 점선·예정 일정 점 (아트보드) */
+
+  /* 서체 — next/font가 --font-plex-*를 채운다. 못 받으면 시스템 서체로 */
+  --font-sans: var(--font-plex-sans, "IBM Plex Sans KR"), system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono, "IBM Plex Mono"), ui-monospace, monospace;
+
+  /* 반경 */
+  --r-card: 14px;
+  --r-block: 10px;
+  --r-btn: 8px;
+  --r-pill: 999px;
+
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: var(--bg-0);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+
+a {
+  color: var(--ai);
+}
+a:hover {
+  color: #a99cff;
+}
+
+/* 키보드 초점은 항상 보이게 */
+:focus-visible {
+  outline: 2px solid var(--ai);
+  outline-offset: 2px;
+}
+
+@layer components {
+  /* 숫자는 전부 모노 + tabular-nums (docs/10 §2) */
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .card {
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-card);
+  }
+  .skeleton {
+    background: var(--bg-3);
+    animation: skeleton 1.4s ease-in-out infinite;
+    border-radius: 6px;
+  }
+  .skip-link {
+    position: absolute;
+    left: 8px;
+    top: -48px;
+    z-index: 100;
+    padding: 8px 14px;
+    border-radius: var(--r-btn);
+    background: var(--ai);
+    color: var(--bg-0);
+    font-weight: 700;
+  }
+  .skip-link:focus {
+    top: 8px;
+    color: var(--bg-0);
+  }
+}
+
+@keyframes skeleton {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}

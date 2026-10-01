@@ -208,6 +208,7 @@ def build_upbit_paper(
         )
         link = SettingsEngineLink(config)
     bus: object = _LogBus()
+    recorder = None
     if hub is not None:
         from quantpilot.realtime.bus import EventRecorder, HubBus
 
@@ -224,6 +225,7 @@ def build_upbit_paper(
         bus,
         cost=cost,
         shadow=shadow,
+        record_signal=recorder.signal if recorder is not None else None,
     )
     orders = None
     if hub is not None:

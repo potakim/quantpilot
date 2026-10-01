@@ -2,7 +2,7 @@
 
 1. risk.check → 거부면 signals.outcome = risk_rejected
 2. limiter.acquire(group)
-3. broker.submit — retryable 오류는 지수 백오프(0.5·1·2초) 재시도, 다 실패하면 risk.api_error()
+3. broker.submit (접수되면 signals.outcome = ordered) — retryable 오류는 지수 백오프(0.5·1·2초) 재시도, 다 실패하면 risk.api_error()
 4. 대기(pending)면 order_status로 체결 확인. 시장가는 30초 뒤 취소하고 1회 재주문, 지정가는 ttl 뒤 취소
 5. 체결 → ledger.save_order·record → 브로커 계좌 상태 저장(persist) → signals.outcome = filled
 
@@ -134,6 +134,8 @@ class OrderExecutor:
         order.risk_adjustments = list(getattr(d, "adjustments", []))
 
         res = await self._submit(order, price, is_exit)
+        if isinstance(res, Fill) or _pending(res):
+            await self._outcome(order, "ordered")
         if _pending(res):
             res = await self._wait(order)
             if res is order and order.reject_reason == "timeout" and order.type == OrderType.MARKET:

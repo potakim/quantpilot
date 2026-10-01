@@ -217,8 +217,10 @@ async def get_backtest(
     bid: int,
 ) -> dict[str, Any]:
     """상태·지표·시도 횟수·자산곡선(최대 500점)·낙폭·체결 끝부분."""
-    row, blob = await _row_and_blob(deps, bid)
+    # 허브 상태를 행보다 먼저 읽는다. run_job은 파일·행·허브 순으로 쓰므로
+    # 허브가 done이면 행·파일은 이미 채워져 있다 (반대 순서면 done+빈 metrics 가능).
     state = await deps.hub.get(hk.backtest(bid)) or {}
+    row, blob = await _row_and_blob(deps, bid)
     status = state.get("status") or ("done" if blob is not None else "unknown")
     out: dict[str, Any] = {
         "id": bid,

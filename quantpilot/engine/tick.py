@@ -18,13 +18,16 @@ on_time_exit·on_stop_check는 판단 모델을 거치지 않는다 (01 §3: 청
 섀도 원장(06 §6.2, ADR 0016): `shadow` executor를 주면 ON이 받은 전략 신호를 그대로 게이팅 없이(배수 1.0)
 섀도 계좌에도 낸다. 판단은 한 번만 부르고, 섀도는 자기 risk.check → submit·포지션·손절선을 따로 가진다.
 섀도의 체결·주문은 버스에 발행하지 않는다(화면·알림이 실제 페이퍼 원장과 섞이지 않게).
+
+신호 id(t18): `record_signal`을 주면 ON 원장 신호를 먼저 기록해 받은 id를 SignalEvent와 그 신호로 만든 ON 주문에
+싣는다. 그래야 OrderExecutor가 signals.outcome(ordered·filled·risk_rejected)을 남긴다. 섀도 주문에는 싣지 않는다.
 """
 
 from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 
@@ -93,6 +96,7 @@ class TickRunner:
         allow_short: bool = False,
         min_trade_frac: float = 0.002,
         shadow: OrderExecutor | None = None,
+        record_signal: Callable[[SignalEvent], Awaitable[int]] | None = None,
     ):
         if getattr(risk, "unrestricted", False) and not executor.is_paper:
             raise ValueError("규칙 미적용 리스크 게이트는 페이퍼 브로커와만 쓸 수 있다 (ADR 0010)")
@@ -107,6 +111,7 @@ class TickRunner:
         self.pipeline = pipeline
         self.executor = executor
         self.shadow = shadow
+        self.record_signal = record_signal
         self.risk = risk
         self.clock = clock
         self.bus = bus
@@ -223,6 +228,9 @@ class TickRunner:
         kind = "rebalance" if s.timeframe == "1M" else ("entry" if c.grows else "exit")
         signal = SignalEvent(self.market, s.name, t, kind, ts)
         if on_book:
+            sid = await self._record(signal)
+            if sid is not None:
+                signal = replace(signal, signal_id=sid)
             await self.bus.publish("signal", signal)
             if c.ctx is not None and any(b is self._off for b, _ in books):
                 self.shadow_signals += 1  # 전략 신호만 센다 (손절·시간 청산은 원장별 규칙)
@@ -242,10 +250,30 @@ class TickRunner:
             m = 1.0 if b.shadow else mult
             if c.grows and m <= 0:
                 continue
-            await self._order(b, c, ref, equity, m, ts)
+            await self._order(b, c, ref, equity, m, ts, None if b.shadow else signal.signal_id)
+
+    async def _record(self, signal: SignalEvent) -> int | None:
+        """신호를 기록하고 id를 돌려준다. 기록 실패는 로그만 남긴다 — 기록 때문에 매매가 멈추면 안 된다."""
+        if self.record_signal is None:
+            return None
+        try:
+            return await self.record_signal(signal)
+        except Exception:
+            log.exception(
+                "signal_record_failed",
+                extra={"symbol": signal.target.symbol, "strategy": signal.strategy},
+            )
+            return None
 
     async def _order(
-        self, b: _Book, c: _Candidate, ref: float, equity: float, mult: float, ts: datetime
+        self,
+        b: _Book,
+        c: _Candidate,
+        ref: float,
+        equity: float,
+        mult: float,
+        ts: datetime,
+        signal_id: int | None = None,
     ) -> None:
         """6~8단계: 사이징 → risk.check → submit → 발행(섀도는 발행 안 함)."""
         s, t = c.strategy, c.target
@@ -268,6 +296,7 @@ class TickRunner:
             ts=pd.Timestamp(ts).to_pydatetime(),
             size_multiplier=mult if c.grows else None,
             paper=ex.is_paper,
+            signal_id=signal_id,
         )
 
         # 7. risk.check → submit

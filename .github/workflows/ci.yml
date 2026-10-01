@@ -1,10 +1,12 @@
-# CI Workflow (P1-14a)
+# CI Workflow (P1-14)
 #
 # push·PR마다 테스트와 린트를 돌린다 (docs/08-testing.md §7).
 #   1. pytest -m "not network"  — 실 API 호출 테스트는 제외
 #   2. ruff check .             — 린트
 #   3. ruff format --check .    — 서식 (.claude는 pyproject extend-exclude로 제외)
-# 이미지 빌드·GHCR push는 P1-14 배포 부분에서 추가한다.
+# web 잡은 화면(P1-13, ADR 0018)을 따로 검사한다.
+# 둘 다 통과하면 백엔드·web 이미지를 빌드한다. PR은 빌드만, main push는 GHCR로 올린다 (docs/07 §2, ADR 0019).
+# 러너는 VPS와 같은 ubuntu-24.04로 고정한다 (ubuntu-latest가 26으로 바뀌어도 흔들리지 않게).
 
 name: CI
 
@@ -24,13 +26,14 @@ concurrency:
 jobs:
   test:
     name: pytest + ruff (py3.11)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
+      # setup-uv는 주 버전 태그(v10)를 두지 않는다 — 전체 버전으로 고정
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: "3.11"
 
@@ -55,7 +58,7 @@ jobs:
   # 데모 API 비밀번호·시크릿은 실행마다 무작위로 만든다 (저장소에 값 없음).
   web:
     name: web (lint · test · build · lighthouse)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     defaults:
       run:
@@ -64,7 +67,7 @@ jobs:
       NEXT_TELEMETRY_DISABLED: "1"
       QP_API_URL: http://127.0.0.1:8000
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 데모 비밀번호·시크릿 생성 (실행마다 무작위)
         run: |
@@ -78,9 +81,10 @@ jobs:
             echo "QP_JWT_SECRET=$secret"
           } >> "$GITHUB_ENV"
 
-      - uses: actions/setup-node@v4
+      # Node 20은 2026-04 지원 종료 — web/Dockerfile과 같은 22 LTS
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -103,7 +107,7 @@ jobs:
         run: npm run check-secrets
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: "3.11"
 
@@ -132,8 +136,69 @@ jobs:
 
       - name: Lighthouse 리포트
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lighthouse
           path: web/.lighthouseci
           if-no-files-found: ignore
+
+  image:
+    name: images (backend · web)
+    needs: [test, web]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        if: env.PUSH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Backend image tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/quantpilot
+          tags: |
+            type=sha,format=long,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Backend build (push on main)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: ${{ env.PUSH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Web image tags
+        id: meta-web
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/quantpilot-web
+          tags: |
+            type=sha,format=long,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Web build (push on main)
+        uses: docker/build-push-action@v7
+        with:
+          context: web
+          push: ${{ env.PUSH == 'true' }}
+          tags: ${{ steps.meta-web.outputs.tags }}
+          labels: ${{ steps.meta-web.outputs.labels }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web

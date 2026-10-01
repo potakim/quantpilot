@@ -1,3 +1,5 @@
+# 개발용 (docs/07 §1 dev). 운영 paper 배포는 deploy/compose.yml + scripts/deploy.sh
+# 포트는 이 컴퓨터(127.0.0.1)에만 연다
 services:
   db:
     image: timescale/timescaledb:latest-pg16
@@ -5,18 +7,18 @@ services:
       POSTGRES_USER: quantpilot
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-quantpilot}
       POSTGRES_DB: quantpilot
-    ports: ["5432:5432"]
+    ports: ["127.0.0.1:5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
   redis:
     image: redis:7-alpine
-    ports: ["6379:6379"]
+    ports: ["127.0.0.1:6379:6379"]
   api:
     build: .
     env_file: .env
     environment:
       QP_DATABASE_URL: postgresql+asyncpg://quantpilot:${POSTGRES_PASSWORD:-quantpilot}@db:5432/quantpilot
       QP_REDIS_URL: redis://redis:6379/0
-    ports: ["8000:8000"]
+    ports: ["127.0.0.1:8000:8000"]
     depends_on: [db, redis]
     volumes: ["./data:/app/data"]
 volumes:

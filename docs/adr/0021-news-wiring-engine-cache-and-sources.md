@@ -1,6 +1,6 @@
 # 0021 · 뉴스·이벤트 배선: DB 경유 엔진 캐시, 기본 피드 설정 파일, 키 없을 때의 대체물
 
-상태: 제안 (2026-10-02)
+상태: 승인 (2026-10-02)
 
 ## 맥락
 P1-06(t8)에서 `FeatureBuilder`·`NewsCollector`·`NewsCache`·`EventCalendar`를, P1-08(t10)에서 Claude·Gemini 어댑터를 만들었다. 하지만 배선이 빠져 있었다. 엔진(`engine/main.py::build_upbit_paper`)은 뉴스·지표 없는 `StubFeatureBuilder`를 썼고, scheduler(`build_context`)는 `news`·`reviewer`를 넣지 않았다. 그래서 `news_collect` 잡은 아무것도 하지 않았고, `daily_review`는 "리뷰 모델 미연결"로 통계만 저장했다.

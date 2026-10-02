@@ -29,6 +29,7 @@ from quantpilot.engine.tick import TickRunner
 
 if TYPE_CHECKING:
     from quantpilot.core.ports import Hub
+    from quantpilot.data.news import NewsRefresher
     from quantpilot.db.repo import Sessions
     from quantpilot.engine.orders import ManualOrderConsumer
 
@@ -48,6 +49,7 @@ class MarketEngine:
         link: EngineLink | None = None,
         link_every: float = 5.0,
         orders: ManualOrderConsumer | None = None,
+        news: NewsRefresher | None = None,
     ):
         self.runner = runner
         self.aggregator = aggregator
@@ -56,6 +58,7 @@ class MarketEngine:
         self.link = link
         self.link_every = link_every
         self.orders = orders
+        self.news = news  # scheduler가 DB에 쌓은 뉴스 → 피처 빌더 캐시 (ADR 0021)
         self._closed: list[BarClosed] = []
         self._last_link: datetime | None = None
 
@@ -73,6 +76,8 @@ class MarketEngine:
         """마감 + grace가 지난 구간의 봉을 시각별 묶음으로 넘긴다. 넘긴 봉 수를 돌려준다."""
         now = self.clock.now()
         await self.on_link(now)
+        if self.news is not None:
+            await self.news.maybe_refresh()
         if self.orders is not None:
             await self.orders.drain()
         self._closed += self.aggregator.on_timer(now)
@@ -153,9 +158,12 @@ def build_upbit_paper(
     from quantpilot.config import settings
     from quantpilot.core.clock import MarketClock
     from quantpilot.core.models import Market
-    from quantpilot.engine.replay import DirectExecutor, StubFeatureBuilder
+    from quantpilot.data.events import EventCalendar
+    from quantpilot.data.news import CacheNewsSource, NewsCache, NewsRefresher
+    from quantpilot.engine.replay import DirectExecutor
     from quantpilot.execution.paper import PaperBroker
     from quantpilot.execution.risk import RiskManager
+    from quantpilot.features.builder import FeatureBuilder
     from quantpilot.judgment.pipeline import build_pipeline
     from quantpilot.strategies import create
 
@@ -169,6 +177,11 @@ def build_upbit_paper(
     clock = MarketClock(market)
     cost = preset(market)
     link = None
+    # 판단 입력: 지표 + 뉴스(DB → 메모리 캐시) + 이벤트 캘린더 (04 §3, ADR 0021)
+    news_cache = NewsCache()
+    calendar = EventCalendar.from_yaml(settings.events_file)
+    features = FeatureBuilder(market, news=CacheNewsSource(news_cache), events=calendar)
+    refresher = None
     if sessions is None:
         executor = DirectExecutor(PaperBroker(market, cost, settings.initial_cash_krw), risk)
         # 게이팅 OFF 섀도: 같은 CostModel·같은 규칙의 별도 RiskManager (06 §6.2, ADR 0016)
@@ -207,6 +220,9 @@ def build_upbit_paper(
             shadow_broker, RiskManager(), SqlLedger(sessions, shadow=True), NoLimiter()
         )
         link = SettingsEngineLink(config)
+        from quantpilot.db.news_repo import SqlNewsRepo
+
+        refresher = NewsRefresher(SqlNewsRepo(sessions), news_cache, calendar=calendar)
     bus: object = _LogBus()
     recorder = None
     if hub is not None:
@@ -217,7 +233,7 @@ def build_upbit_paper(
     runner = TickRunner(
         market,
         strategies,
-        StubFeatureBuilder(market.value),
+        features,
         build_pipeline(settings, bus=bus),
         executor,
         risk,
@@ -232,7 +248,9 @@ def build_upbit_paper(
         from quantpilot.engine.orders import ManualOrderConsumer
 
         orders = ManualOrderConsumer(hub, runner)
-    return MarketEngine(runner, CandleAggregator("1m", market), clock, link=link, orders=orders)
+    return MarketEngine(
+        runner, CandleAggregator("1m", market), clock, link=link, orders=orders, news=refresher
+    )
 
 
 class _LogBus:

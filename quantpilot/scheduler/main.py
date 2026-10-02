@@ -12,6 +12,7 @@ from typing import Any
 
 from quantpilot.config import settings
 from quantpilot.core.models import Market
+from quantpilot.db.news_repo import SqlNewsRepo
 from quantpilot.db.repo import (
     Sessions,
     SqlCandleRepo,
@@ -30,6 +31,7 @@ from quantpilot.scheduler.backup import account_source, backup_factory, restore_
 from quantpilot.scheduler.context import JobContext
 from quantpilot.scheduler.jobs.health import reconcile
 from quantpilot.scheduler.registry import install, register
+from quantpilot.scheduler.wiring import make_daily_reviewer, make_news_collector
 
 log = logging.getLogger(__name__)
 
@@ -45,7 +47,7 @@ def last_snapshot_cash(ops: SqlOpsRepo) -> CashRef:
 
 
 def build_context(sessions: Sessions, markets: tuple[Market, ...] = (Market.UPBIT,)) -> JobContext:
-    """DB 기반 JobContext. 뉴스 수집기·리뷰 모델은 부품이 준비되면 여기서 붙인다.
+    """DB 기반 JobContext. 뉴스 수집기·일일 리뷰 모델은 scheduler/wiring.py (ADR 0021).
 
     대조할 브로커는 페이퍼 전용이라 DB 계좌 복원이다 — 실브로커 어댑터가 생기면 `brokers`만 바꾼다.
     """
@@ -76,6 +78,8 @@ def build_context(sessions: Sessions, markets: tuple[Market, ...] = (Market.UPBI
             cash_ref=last_snapshot_cash(ops),
         ),
         brokers=brokers,
+        news=make_news_collector(settings, SqlNewsRepo(sessions)),
+        reviewer=make_daily_reviewer(settings),
     )
 
 

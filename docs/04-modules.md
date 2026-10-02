@@ -121,7 +121,7 @@ class OrderExecutor:
 | `kis_ws.py` | `KISStream(app_key, symbols)` — 체결가·호가·체결통보. approval_key 발급, 41건 제한 관리 |
 | `aggregator.py` | `CandleAggregator(tf, market)` — `on_trade()` → 새 구간 첫 체결이면 직전 봉 `BarClosed`, `on_timer(now)` → 마감+2초 지난 봉 확정. 체결 없는 구간은 봉 없음, 확정된 구간의 늦은 체결은 버림. 일봉 경계는 업비트 09:00 KST |
 | `store.py` | `CandleStore(repo: CandleRepo, market)` — `upsert(bars)`, `load(symbol, tf, start, end)` → OHLCV DataFrame(loader 규격, `[start, end)`), 구간 캐시(upsert 시 해당 심볼·주기 폐기) |
-| `news.py` | `NewsCollector(feeds, summarizer, repo, keywords=, stock_symbols=)` — RSS·Atom·DART 공시 목록 수집(`httpx`, `fetch` 주입 가능), 48시간 넘은 것 제외, 중복 제거(`raw_hash`, 배치 안 + 저장소), 종목·키워드 매칭(`"*"`는 거시 키워드 → 전 종목, 미매칭은 버림), 그 뒤에만 요약기 호출. DOCTYPE/ENTITY 있는 XML 거부. `NewsCache`(메모리 저장소) + `CacheNewsSource`(피처 빌더용). DART 키는 `QP_DART_API_KEY` |
+| `news.py` | `NewsCollector(feeds, summarizer, repo, keywords=, stock_symbols=)` — RSS·Atom·DART 공시 목록 수집(`httpx`, `fetch` 주입 가능), 48시간 넘은 것 제외, 중복 제거(`raw_hash`, 배치 안 + 저장소), 종목·키워드 매칭(`"*"`는 거시 키워드 → 전 종목, 미매칭은 버림), 그 뒤에만 요약기 호출. DOCTYPE/ENTITY 있는 XML 거부. `NewsCache`(메모리 저장소) + `CacheNewsSource`(피처 빌더용). DART 키는 `QP_DART_API_KEY`. 피드·키워드는 `load_news_config(QP_NEWS_FILE)`(기본 `data/news_sources.yaml`), 시간대 없는 피드 날짜는 `Feed.naive_utc_offset_hours`. 키 없는 요약기 `TitleSummarizer`. 엔진용 `NewsRefresher` — scheduler가 DB에 쌓은 뉴스를 5분마다 캐시로 (ADR 0021) |
 | `events.py` | `EventCalendar` — 수동 YAML(`EventCalendar.from_yaml`, tz 없는 시각은 `market` 현지시간) + `events_from_dart`(상장폐지·관리종목·거래정지·잠정실적 공시 → 그 종목 이벤트) |
 
 ## 7. engine (1단계 신규)
@@ -141,6 +141,7 @@ class TickRunner:
 - `on_stop_check`는 체결가마다 돌지만 판단 모델·LLM을 호출하지 않는다. 진입 target의 `stop` 이탈 시 즉시 exit target.
 - `feature_builder`·`pipeline`·`executor`·`risk`·`clock`·`bus`는 `core/ports.py`의 Protocol이다. 봉 히스토리는 `engine/history.py::BarHistory`(백테스트는 미리 적재한 DataFrame의 커서, 실전은 `CandleStore.load`로 시드 후 봉마다 추가).
 - `shadow` executor를 주면 ON이 발행한 전략 신호를 같은 틱에 섀도 계좌로도 낸다(판단은 한 번, 섀도 배수 1.0, 자기 `risk.check → submit`, 손절·시간 청산은 원장별). 섀도 체결은 버스에 발행하지 않는다. 페이퍼 엔진은 항상 섀도를 둔다 (06 §6.2, ADR 0016).
+- 실시간 페이퍼 엔진(`engine/main.py::build_upbit_paper`)의 피처 빌더는 `features/builder.py::FeatureBuilder`다. 뉴스는 `NewsRefresher`가 엔진 타이머에서 DB `news_items`를 5분마다 `NewsCache`로 옮기고, 이벤트는 `QP_EVENTS_FILE` YAML + DART 위험 공시다 (ADR 0021). 판단 모델이 `stub`이면 뉴스는 판단 로그에만 남고 사이징은 바뀌지 않는다.
 - 백테스터는 이 `TickRunner`를 `PaperBroker` + `DirectExecutor` + `StubPipeline(StubJudge, gating=False)` + `ReplayClock` + `UnrestrictedRisk`(기본, `apply_risk=True`면 `RiskManager`)로 돌린다. 0단계 `Backtester.run`의 인라인 루프는 제거했다. 배선 결정과 0단계 대비 수치 차이는 ADR 0010.
 
 ## 8. scheduler (1단계 신규)
@@ -167,6 +168,8 @@ APScheduler(AsyncIOScheduler), 잡은 DB에 영속(`SQLAlchemyJobStore`).
 | `alert_repeat` | 매분 | 미해결 critical 알림을 5분마다 재전송 (07 §6, ADR 0015) |
 
 engine ↔ scheduler는 P1-12 Redis 전까지 DB `settings` 우편함(`engine/link.py::SettingsEngineLink`)으로 하트비트와 시간 청산 명령을 주고받는다. 정상일 때는 엔진이 명령을 받아 `TickRunner.on_time_exit`를 부르고, 하트비트가 끊기면 scheduler가 DB 계좌로 만든 `TickRunner`의 `on_time_exit`를 직접 부른다(ADR 0013). 잡 표는 `scheduler/registry.py::JOBS`에 있다.
+
+부품 배선은 `scheduler/wiring.py`(ADR 0021): `news_collect`는 `make_news_collector`(피드 설정 + Gemini 요약기, 키 없으면 `TitleSummarizer`) → `SqlNewsRepo`, `daily_review`는 `make_daily_reviewer`(Claude `ClaudeAnswerer`, 키 없으면 통계만). 키 값은 로그에 남지 않는다.
 
 ## 9. db
 

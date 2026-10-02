@@ -21,7 +21,9 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from quantpilot.core.clock import to_utc, upbit_trading_day
 from quantpilot.core.events import BarClosed, TradeEvent
+from quantpilot.core.models import Market
 from quantpilot.core.ports import Clock, EngineLink
 from quantpilot.data.aggregator import CandleAggregator
 from quantpilot.data.store import CandleStore
@@ -108,6 +110,7 @@ class MarketEngine:
         market = self.runner.market
         await self.link.beat(market)
         await self._sync_halt(market)
+        await self._sync_prescreen(market)
         for s in self.runner.strategies:
             cmd_id = await self.link.pending_time_exit(market, s.name)
             if cmd_id is None:
@@ -126,6 +129,20 @@ class MarketEngine:
         elif not reason and risk.halted_reason.startswith("reconcile"):
             risk.halted_reason = ""
             log.info("halt released", extra={"market": market.value})
+
+    async def _sync_prescreen(self, market) -> None:
+        """08:10 사전 심사 제외 목록을 판단 파이프라인에 넣는다 (ADR 0022).
+
+        오늘 업비트 거래일(09:00 KST 경계)의 목록만 쓴다. 지난 날 것이나 없으면 제외 없음.
+        파이프라인이 제외를 모르면(StubPipeline = 게이팅 OFF) 아무것도 하지 않는다.
+        """
+        apply = getattr(getattr(self.runner, "pipeline", None), "set_prescreen", None)
+        if apply is None or market != Market.UPBIT:
+            return
+        got = await self.link.prescreen(market)
+        today = upbit_trading_day(to_utc(self.clock.now(), market)).isoformat()
+        blocked = got[1] if got is not None and got[0] == today else {}
+        apply(blocked)
 
     async def run(self, stream, *, interval: float = 1.0) -> None:
         """스트림(run()이 체결을 on_trade로 넘김)과 타이머를 함께 돌린다."""
@@ -157,7 +174,6 @@ def build_upbit_paper(
     from quantpilot.backtest.costs import preset
     from quantpilot.config import settings
     from quantpilot.core.clock import MarketClock
-    from quantpilot.core.models import Market
     from quantpilot.data.events import EventCalendar
     from quantpilot.data.news import CacheNewsSource, NewsCache, NewsRefresher
     from quantpilot.engine.replay import DirectExecutor

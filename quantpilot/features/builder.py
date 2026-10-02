@@ -115,6 +115,31 @@ def render_events(events: list[EventItem], now_utc: datetime) -> str:
     return "; ".join(parts)
 
 
+def news_only_state(
+    market: Market | str,
+    symbol: str,
+    strategy: str,
+    signal: str,
+    news: list[NewsItem],
+    events: list[EventItem],
+    now_utc: datetime,
+    *,
+    max_tokens: int = MAX_TOKENS,
+) -> State:
+    """봉 없이 뉴스·이벤트만으로 state를 만든다 (08:10 사전 심사, ADR 0022). 규칙은 build와 같다."""
+    picked = select_news(news)
+    fb = FeatureBuilder(market, max_tokens=max_tokens)
+    state = State(
+        fb.market.value,
+        symbol,
+        strategy,
+        signal=_clean(signal, 80),
+        news_summary=fb._news_text(picked),
+        events_24h=render_events(events, now_utc),
+    )
+    return fb._fit(state, picked)
+
+
 class FeatureBuilder:
     """진입 target 하나에 대한 state를 만든다 (core.ports.FeatureBuilder 구현)."""
 

@@ -4,7 +4,8 @@
 - 판단 모델 실패(JudgeError)는 확신도 0 → hold (ADR 0012)
 - hard_blocks나 게이트가 이미 hold면 LLM을 부르지 않는다 — 하드블록이 확신도·합의보다 우선 (불변식 #8)
 - LLM 타임아웃·오류·파싱 실패는 그 모델 hold. 2/2 approve일 때만 통과
-- LLM 합의를 거치는 전략은 `llm_strategies`(06 §4 표: orb·gem·gtaa). vol_breakout의 08:10 사전 심사는 스케줄러 몫
+- LLM 합의를 거치는 전략은 `llm_strategies`(06 §4 표: orb·gem·gtaa). vol_breakout은 08:10 사전 심사
+  (scheduler)가 정한 당일 제외 목록을 엔진이 `set_prescreen`으로 넣고, 제외 종목 진입은 hold (ADR 0022)
 - 하루 AI 비용이 `budget_usd_daily`를 넘으면 LLM 합의 중단(= hold), 판단 모델은 계속
 - 판단 모델 연속 타임아웃이 `judge_down_after`(10)에 닿으면 RiskEvent("judge_down")를 warning으로 한 번 발행
 - 리뷰어에게는 확률·확신도만 보여 주고 approve/hold만 받는다. 수량·가격은 정하지 않는다 (불변식 #7)
@@ -20,7 +21,7 @@ from typing import Any
 
 from quantpilot.core.errors import JudgeError
 from quantpilot.core.events import JudgmentEvent, RiskEvent, SignalEvent
-from quantpilot.core.models import JudgeResult
+from quantpilot.core.models import Gate, JudgeResult
 from quantpilot.core.ports import EventBus
 from quantpilot.judgment.base import JudgeProvider, LLMProvider, LLMVerdict, State, decide
 from quantpilot.judgment.prompts import REVIEW_TIMEOUT_S
@@ -28,6 +29,7 @@ from quantpilot.judgment.prompts import REVIEW_TIMEOUT_S
 log = logging.getLogger(__name__)
 
 LLM_STRATEGIES = frozenset({"orb", "gem", "gtaa"})
+PRESCREEN_STRATEGIES = frozenset({"vol_breakout"})  # 진입마다 LLM 대신 08:10 사전 심사 (ADR 0004)
 JUDGE_DOWN_AFTER = 10
 
 
@@ -61,6 +63,17 @@ class JudgmentPipeline:
         self.judge_down_after = judge_down_after
         self._spent: dict[date, float] = {}
         self._judge_down_sent = False
+        self._prescreen: dict[str, str] = {}
+
+    def set_prescreen(self, blocked: dict[str, str]) -> None:
+        """오늘 사전 심사 제외 목록 {symbol: 사유}. 엔진이 하트비트 때마다 넣는다 (빈 dict = 제외 없음)."""
+        self._prescreen = dict(blocked)
+
+    def _prescreen_block(self, signal: SignalEvent) -> str | None:
+        if signal.strategy not in PRESCREEN_STRATEGIES:
+            return None
+        reason = self._prescreen.get(signal.target.symbol)
+        return None if reason is None else f"prescreen: {reason}"
 
     def spent_usd(self, day: date) -> float:
         """그날 쓴 AI 비용 (판단 모델 + LLM)."""
@@ -76,9 +89,11 @@ class JudgmentPipeline:
         self._add_cost(day, jr.cost_usd)
         await self._check_judge_down(signal)
 
+        # 판단 모델은 제외 종목에도 불러 기록한다 (보정 지표 표본). 제외는 LLM보다 앞선다
+        excluded = self._prescreen_block(signal)
         pre = decide(jr, [], hold_below=self.hold_below, full_above=self.full_above)
         verdicts: list[LLMVerdict] = []
-        if self.gating and pre.proceed and signal.strategy in self.llm_strategies:
+        if self.gating and pre.proceed and not excluded and signal.strategy in self.llm_strategies:
             if self.spent_usd(day) >= self.budget_usd_daily:
                 verdicts = [LLMVerdict("budget", False, "AI 일일 예산 초과 → hold")]
             else:
@@ -86,9 +101,13 @@ class JudgmentPipeline:
                 self._add_cost(day, sum(v.cost_usd for v in verdicts))
 
         d = decide(jr, verdicts, hold_below=self.hold_below, full_above=self.full_above)
-        mult = d.size_multiplier if self.gating else 1.0
+        gate, blocks, mult = d.gate, tuple(d.blocks), d.size_multiplier
+        if excluded:
+            gate, blocks, mult = Gate.HOLD, (*blocks, excluded), 0.0
+        if not self.gating:
+            mult = 1.0
         return JudgmentEvent(
-            signal.signal_id or 0, jr, d.gate, mult, signal.ts, tuple(d.blocks), tuple(verdicts)
+            signal.signal_id or 0, jr, gate, mult, signal.ts, blocks, tuple(verdicts)
         )
 
     async def _consensus(self, state: State, jr: JudgeResult, rule: str) -> list[LLMVerdict]:

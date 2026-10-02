@@ -148,6 +148,14 @@ class EngineLink(Protocol):
         """할트를 푼다 — 사람이 "브로커 기준으로 맞추기"를 눌렀을 때만 부른다."""
         ...
 
+    async def set_prescreen(self, market: Market, day: str, blocked: dict[str, str]) -> None:
+        """08:10 사전 심사 제외 목록을 쓴다 (scheduler, ADR 0022)."""
+        ...
+
+    async def prescreen(self, market: Market) -> tuple[str, dict[str, str]] | None:
+        """마지막 사전 심사 (거래일, {symbol: 사유}). 없으면 None (엔진이 읽는다)."""
+        ...
+
 
 class Notifier(Protocol):
     """알림 (07 §6 등급: info·warning·critical). key가 같은 critical은 resolve 전까지 반복될 수 있다."""

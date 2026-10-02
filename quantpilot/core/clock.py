@@ -46,6 +46,14 @@ def to_local(ts_utc: datetime, market: Market) -> datetime:
     return ts_utc.astimezone(TIMEZONES[Market(market)]).replace(tzinfo=None)
 
 
+UPBIT_DAY_START = timedelta(hours=9)  # 업비트 일봉·변동성 돌파의 하루는 09:00 KST에 바뀐다 (05 §1)
+
+
+def upbit_trading_day(ts_utc: datetime) -> date:
+    """업비트 거래일. 09:00 KST 전이면 전날 거래일이다 (08:10 사전 심사 → 그날 09:00 세션)."""
+    return (to_local(ts_utc, Market.UPBIT) - UPBIT_DAY_START).date()
+
+
 class MarketClock:
     """시장 하나의 세션 시계 (04 §1). 모든 입출력 시각은 현지 tz-naive."""
 

@@ -156,7 +156,7 @@ APScheduler(AsyncIOScheduler), 잡은 DB에 영속(`SQLAlchemyJobStore`).
 | `us_eod_exit` | 04:55 (서머타임) / 05:55 (표준시) | ORB 청산 |
 | `gem_rebalance` | 월 마지막 거래일 미국장 마감 5분 전 | GEM 리밸런싱 |
 | `kis_token_refresh` | 08:00 | 토큰 재발급, 실패 시 국내·미국 휴무 플래그 |
-| `upbit_prescreen` | 08:10 | 대상 코인별 LLM 2모델 news_risk 사전 심사 → 당일 제외 목록 (ADR 0004) |
+| `upbit_prescreen` | 08:10 | 대상 코인별 판단 모델 + LLM 리뷰어 전원 승인 사전 심사 → 당일 제외 목록을 settings 우편함 `engine.prescreen.upbit`에 (ADR 0004·0022, `scheduler/wiring.py::Prescreen`) |
 | `morning_brief` | 08:30 | Claude 아침 브리핑 알림: 일정·보유·리스크 |
 | `news_collect` | 매시 :05 | 뉴스 수집·요약 |
 | `fill_realized_24h` | 매시 :10 | `judgments.realized_ret_24h` 채우기 |
@@ -169,7 +169,7 @@ APScheduler(AsyncIOScheduler), 잡은 DB에 영속(`SQLAlchemyJobStore`).
 
 engine ↔ scheduler는 P1-12 Redis 전까지 DB `settings` 우편함(`engine/link.py::SettingsEngineLink`)으로 하트비트와 시간 청산 명령을 주고받는다. 정상일 때는 엔진이 명령을 받아 `TickRunner.on_time_exit`를 부르고, 하트비트가 끊기면 scheduler가 DB 계좌로 만든 `TickRunner`의 `on_time_exit`를 직접 부른다(ADR 0013). 잡 표는 `scheduler/registry.py::JOBS`에 있다.
 
-부품 배선은 `scheduler/wiring.py`(ADR 0021): `news_collect`는 `make_news_collector`(피드 설정 + Gemini 요약기, 키 없으면 `TitleSummarizer`) → `SqlNewsRepo`, `daily_review`는 `make_daily_reviewer`(Claude `ClaudeAnswerer`, 키 없으면 통계만). 키 값은 로그에 남지 않는다.
+부품 배선은 `scheduler/wiring.py`(ADR 0021·0022): `news_collect`는 `make_news_collector`(피드 설정 + Gemini 요약기, 키 없으면 `TitleSummarizer`) → `SqlNewsRepo`, `daily_review`는 `make_daily_reviewer`(Claude `ClaudeAnswerer`, 키 없으면 통계만). 키 값은 로그에 남지 않는다. `upbit_prescreen` 훅은 `make_prescreen`(엔진과 같은 판단 모델·리뷰어 설정).
 
 ## 9. db
 

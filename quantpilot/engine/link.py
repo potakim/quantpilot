@@ -7,6 +7,8 @@ engine과 scheduler는 다른 프로세스다. Redis 허브(P1-12) 전까지 둘
 - `engine.ack.<market>.time_exit.<strategy>` = 처리한 명령 id. 명령 키와 다르면 대기 중.
 - `engine.halt.<market>` = {"reason", "ts", ...}. Reconciler가 걸고, 사람 조작만 지운다(ADR 0015).
   엔진은 하트비트 때마다 읽어서 RiskManager.halted_reason에 반영한다.
+- `engine.prescreen.<market>` = {"day", "blocked": {symbol: 사유}, "ts"}. 08:10 사전 심사 결과
+  (ADR 0004·0022). scheduler만 쓰고, 엔진은 하트비트 때마다 읽어 판단 파이프라인에 넘긴다.
 
 전략마다 키가 따로라서 한 키를 두 프로세스가 동시에 고치지 않는다(명령은 scheduler만, ack는 처리한 쪽만).
 """
@@ -89,3 +91,19 @@ class SettingsEngineLink:
     async def clear_halt(self, market: Market) -> None:
         """할트를 푼다 (사람 조작 경로에서만)."""
         await self.config.set_setting(self._halt_key(market), None)
+
+    @staticmethod
+    def _prescreen_key(market: Market) -> str:
+        return f"engine.prescreen.{Market(market).value}"
+
+    async def set_prescreen(self, market: Market, day: str, blocked: dict[str, str]) -> None:
+        """그 거래일(day, 현지 YYYY-MM-DD)의 사전 심사 제외 목록 {symbol: 사유}을 쓴다."""
+        value = {"day": day, "blocked": dict(blocked), "ts": self.utcnow().isoformat()}
+        await self.config.set_setting(self._prescreen_key(market), value)
+
+    async def prescreen(self, market: Market) -> tuple[str, dict[str, str]] | None:
+        """마지막 사전 심사 (day, {symbol: 사유}). 없으면 None."""
+        raw = await self.config.get_setting(self._prescreen_key(market))
+        if not raw:
+            return None
+        return str(raw.get("day", "")), dict(raw.get("blocked") or {})

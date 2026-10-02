@@ -31,7 +31,7 @@ from quantpilot.scheduler.backup import account_source, backup_factory, restore_
 from quantpilot.scheduler.context import JobContext
 from quantpilot.scheduler.jobs.health import reconcile
 from quantpilot.scheduler.registry import install, register
-from quantpilot.scheduler.wiring import make_daily_reviewer, make_news_collector
+from quantpilot.scheduler.wiring import make_daily_reviewer, make_news_collector, make_prescreen
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +80,7 @@ def build_context(sessions: Sessions, markets: tuple[Market, ...] = (Market.UPBI
         brokers=brokers,
         news=make_news_collector(settings, SqlNewsRepo(sessions)),
         reviewer=make_daily_reviewer(settings),
+        hooks={"upbit_prescreen": make_prescreen(settings, SqlNewsRepo(sessions))},
     )
 
 

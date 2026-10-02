@@ -1,0 +1,44 @@
+# 뉴스 수집 기본 설정 (data/news.py::load_news_config, ADR 0021)
+# 바꾸려면 이 파일을 복사해 고친 뒤 QP_NEWS_FILE=<경로> 로 지정한다.
+#
+# feeds: 2026-10-02에 data.news.parse_rss로 실제로 받아 읽히는 것을 확인한 피드만 넣었다.
+#   제외: coinreaders(403), hankyung finance(403)
+#   naive_utc_offset_hours: 날짜에 시간대 표시가 없는 피드(einfomax는 "2026-10-02 12:02:02" KST)
+# keywords: 제목·본문을 소문자로 바꿔 '포함' 여부만 본다. 짧은 약어는 다른 단어에 섞여 오탐한다
+#   (SOL→solution, ADA→Canada, SEC→second, ETH→method, 리플→트리플) — 정식 이름 위주로 쓴다.
+#   "*"는 거시 키워드: 매칭되면 모든 종목의 뉴스로 본다.
+
+feeds:
+  # 코인 매체 (영문)
+  - {name: coindesk, url: "https://www.coindesk.com/arc/outboundfeeds/rss/"}
+  - {name: cointelegraph, url: "https://cointelegraph.com/rss"}
+  - {name: decrypt, url: "https://decrypt.co/feed"}
+  - {name: theblock, url: "https://www.theblock.co/rss.xml"}
+  # 코인 매체 (국내)
+  - {name: blockmedia, url: "https://www.blockmedia.co.kr/feed"}
+  - {name: tokenpost, url: "https://www.tokenpost.kr/rss"}
+  # 국내 경제·금융
+  - {name: einfomax, url: "https://news.einfomax.co.kr/rss/allArticle.xml", naive_utc_offset_hours: 9}
+  - {name: yna_economy, url: "https://www.yna.co.kr/rss/economy.xml"}
+  # 공시 (QP_DART_API_KEY 없으면 건너뜀)
+  - {name: dart, url: "https://opendart.fss.or.kr/api/list.json", kind: dart}
+
+keywords:
+  "*":
+    - FOMC
+    - 기준금리
+    - 연준
+    - Federal Reserve
+    - 소비자물가
+    - 증권거래위원회
+    - Securities and Exchange Commission
+    - 가상자산 규제
+    - 가상자산 거래소
+  KRW-BTC: [비트코인, Bitcoin, BTC]
+  KRW-ETH: [이더리움, Ethereum]
+  KRW-SOL: [솔라나, Solana]
+  KRW-XRP: [XRP, Ripple, 엑스알피]
+  KRW-ADA: [카르다노, Cardano, 에이다]
+
+# DART 종목코드 → 심볼 (주식 전략을 붙일 때 채운다)
+stock_symbols: {}

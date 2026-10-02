@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     gate_full_above: float = 0.9
     ai_budget_usd_daily: float = 2.0  # 넘으면 LLM 합의 중단(= hold), 판단 모델은 계속 (06 §7)
 
+    # 뉴스·이벤트 (ADR 0021). news_file이 비면 패키지 기본값 quantpilot/data/news_sources.yaml
+    news_file: Path | None = None
+    events_file: Path = Path("data/events.yaml")  # 수동 캘린더(FOMC·점검 등), 없으면 빈 캘린더
+
     # 리스크 규칙은 설정에 없다 — ADR 0003: execution/risk.py::RiskRules 코드 상수.
 
     # 백테스트

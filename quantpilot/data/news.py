@@ -18,20 +18,29 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+from pathlib import Path
+from typing import Any
 from xml.etree import ElementTree as ET
 
-from quantpilot.core.news import NewsItem, NewsRepo, Summarizer
+from quantpilot.core.news import SUMMARY_MAX_CHARS, NewsItem, NewsRepo, Summarizer, Summary
 
 try:
     import httpx
 except ImportError:  # pragma: no cover - httpx는 기본 의존성이지만 어댑터 규칙대로 감싼다
     httpx = None
 
+try:
+    import yaml
+except ImportError:  # pragma: no cover - uvicorn[standard]가 끌어오지만 어댑터 규칙대로 감싼다
+    yaml = None
+
 log = logging.getLogger(__name__)
 
 ALL_SYMBOLS = "*"  # 거시 뉴스: 모든 종목에 해당
+# 기본 피드·키워드 (QP_NEWS_FILE로 바꿀 수 있다, ADR 0021)
+DEFAULT_SOURCES_FILE = Path(__file__).with_name("news_sources.yaml")
 MAX_BYTES = 2_000_000
 MAX_AGE = timedelta(hours=48)
 DART_LIST_URL = "https://opendart.fss.or.kr/api/list.json"
@@ -43,11 +52,15 @@ Fetch = Callable[[str, Mapping[str, str]], Awaitable[str]]
 
 @dataclass(frozen=True)
 class Feed:
-    """수집 대상. kind='rss'(RSS 2.0·Atom) 또는 'dart'(OpenDART 공시 목록 JSON)."""
+    """수집 대상. kind='rss'(RSS 2.0·Atom) 또는 'dart'(OpenDART 공시 목록 JSON).
+
+    naive_utc_offset_hours: 날짜에 시간대 표시가 없는 피드의 UTC 오프셋 (예: 한국 매체 9).
+    """
 
     name: str
     url: str
     kind: str = "rss"
+    naive_utc_offset_hours: int = 0
 
 
 async def httpx_fetch(url: str, params: Mapping[str, str]) -> str:
@@ -75,21 +88,28 @@ def _child_text(el: ET.Element, *names: str) -> str:
     return ""
 
 
-def _parse_ts(text: str) -> datetime | None:
+def _parse_ts(text: str, naive_utc_offset_hours: int = 0) -> datetime | None:
     if not text:
         return None
     try:
         ts = parsedate_to_datetime(text)  # RSS pubDate (RFC 822)
     except (TypeError, ValueError):
         try:
-            ts = datetime.fromisoformat(text)  # Atom (RFC 3339)
+            ts = datetime.fromisoformat(text)  # Atom (RFC 3339), "YYYY-MM-DD HH:MM:SS"
         except ValueError:
             return None
-    return ts.replace(tzinfo=UTC) if ts.tzinfo is None else ts.astimezone(UTC)
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone(timedelta(hours=naive_utc_offset_hours)))
+    return ts.astimezone(UTC)
 
 
-def parse_rss(text: str, source: str, *, fetched_at: datetime) -> list[NewsItem]:
-    """RSS 2.0 `<item>`·Atom `<entry>` → NewsItem. 날짜가 없으면 수집 시각."""
+def parse_rss(
+    text: str, source: str, *, fetched_at: datetime, naive_utc_offset_hours: int = 0
+) -> list[NewsItem]:
+    """RSS 2.0 `<item>`·Atom `<entry>` → NewsItem. 날짜가 없으면 수집 시각.
+
+    시간대 표시가 없는 날짜는 naive_utc_offset_hours 시간대로 본다 (기본 UTC).
+    """
     head = text[:4096].upper()
     if "<!DOCTYPE" in head or "<!ENTITY" in text.upper():
         raise ValueError("DTD/entity not allowed")
@@ -103,7 +123,10 @@ def parse_rss(text: str, source: str, *, fetched_at: datetime) -> list[NewsItem]
             continue
         out.append(
             NewsItem(
-                ts=_parse_ts(_child_text(el, "pubDate", "published", "updated", "date"))
+                ts=_parse_ts(
+                    _child_text(el, "pubDate", "published", "updated", "date"),
+                    naive_utc_offset_hours,
+                )
                 or fetched_at,
                 source=source,
                 title=title,
@@ -271,7 +294,9 @@ class NewsCollector:
                 text = await self.fetch(feed.url, params)
                 return parse_dart(text, feed.name, stock_symbols=self.stock_symbols)
             text = await self.fetch(feed.url, {})
-            return parse_rss(text, feed.name, fetched_at=now)
+            return parse_rss(
+                text, feed.name, fetched_at=now, naive_utc_offset_hours=feed.naive_utc_offset_hours
+            )
         except Exception as e:  # noqa: BLE001 — 피드 하나 실패로 멈추지 않음, 메시지엔 키가 섞일 수 있음
             log.warning("feed fetch failed", extra={"feed": feed.name, "error": type(e).__name__})
             return []
@@ -313,3 +338,111 @@ class NewsCollector:
             },
         )
         return todo
+
+
+class TitleSummarizer:
+    """키 없이 쓰는 요약기 (core.news.Summarizer 구현): 제목을 100자로 자르고 위험 플래그는 비운다.
+
+    Gemini 키(QP_GOOGLE_API_KEY)가 없을 때의 대체. 위험 판정은 판단 모델이 제목을 읽고 한다.
+    """
+
+    def summarize(self, title: str, body: str) -> Summary:
+        """제목 → 100자 요약."""
+        text = " ".join(title.split())
+        if len(text) > SUMMARY_MAX_CHARS:
+            text = text[: SUMMARY_MAX_CHARS - 1] + "…"
+        return Summary(text, (), None)
+
+
+@dataclass(frozen=True)
+class NewsConfig:
+    """수집 설정: 피드 목록, 종목별 키워드(`"*"`는 거시), DART 종목코드 → 심볼."""
+
+    feeds: tuple[Feed, ...]
+    keywords: Mapping[str, tuple[str, ...]]
+    stock_symbols: Mapping[str, str]
+
+
+def parse_news_config(data: Mapping[str, Any]) -> NewsConfig:
+    """`{"feeds": [...], "keywords": {...}, "stock_symbols": {...}}` → NewsConfig."""
+    feeds = []
+    for i, row in enumerate(data.get("feeds") or []):
+        if not row.get("name") or not row.get("url"):
+            raise ValueError(f"feeds[{i}]: name·url이 필요합니다")
+        kind = str(row.get("kind", "rss"))
+        if kind not in ("rss", "dart"):
+            raise ValueError(f"feeds[{i}]: kind는 rss | dart")
+        feeds.append(
+            Feed(
+                str(row["name"]),
+                str(row["url"]),
+                kind,
+                int(row.get("naive_utc_offset_hours", 0)),
+            )
+        )
+    keywords = {
+        str(sym): tuple(str(w) for w in (words or ()) if str(w).strip())
+        for sym, words in (data.get("keywords") or {}).items()
+    }
+    stock_symbols = {str(k): str(v) for k, v in (data.get("stock_symbols") or {}).items()}
+    return NewsConfig(tuple(feeds), keywords, stock_symbols)
+
+
+def load_news_config(path: str | Path | None = None) -> NewsConfig:
+    """YAML 설정을 읽는다. path가 없으면 패키지 기본값(news_sources.yaml)."""
+    if yaml is None:  # pragma: no cover
+        raise ImportError("pyyaml이 필요합니다")
+    # 빈 환경변수(QP_NEWS_FILE=)는 pydantic이 Path('.')로 읽는다 → 기본값으로 본다
+    p = Path(path) if path and str(path).strip() not in ("", ".") else DEFAULT_SOURCES_FILE
+    return parse_news_config(yaml.safe_load(p.read_text(encoding="utf-8")) or {})
+
+
+class NewsRefresher:
+    """다른 프로세스(scheduler)의 수집기가 DB에 쌓은 뉴스를 엔진 메모리 캐시로 옮긴다 (ADR 0021).
+
+    피처 빌더는 동기라 DB를 직접 못 읽는다. 엔진 타이머가 `maybe_refresh`를 부르면 `every`마다
+    최근 `window` 뉴스를 캐시에 넣고, DART 위험 공시는 이벤트 캘린더에도 넣는다.
+    DB 오류는 로그만 남긴다 — 뉴스 때문에 매매 루프가 멈추면 안 된다.
+    """
+
+    def __init__(
+        self,
+        repo: NewsRepo,
+        cache: NewsCache,
+        *,
+        calendar: Any = None,
+        every: timedelta = timedelta(minutes=5),
+        window: timedelta = MAX_AGE,
+        utcnow: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
+        self.repo = repo
+        self.cache = cache
+        self.calendar = calendar  # data.events.EventCalendar | None
+        self.every = every
+        self.window = window
+        self.utcnow = utcnow
+        self._last: datetime | None = None
+
+    async def refresh(self) -> int:
+        """지금 한 번 읽어 와 캐시에 새로 넣은 수를 돌려준다."""
+        now = self.utcnow()
+        self._last = now
+        items = await self.repo.recent(now - self.window)
+        added = await self.cache.add(items)
+        if self.calendar is not None:
+            from quantpilot.data.events import events_from_dart
+
+            self.calendar.add(events_from_dart(items))
+        if added:
+            log.info("news refreshed", extra={"added": added, "cached": len(self.cache)})
+        return added
+
+    async def maybe_refresh(self) -> int:
+        """마지막 갱신 뒤 `every`가 지났을 때만 갱신한다. 실패하면 0."""
+        if self._last is not None and self.utcnow() - self._last < self.every:
+            return 0
+        try:
+            return await self.refresh()
+        except Exception as e:  # noqa: BLE001 — DB 장애로 엔진을 멈추지 않는다
+            log.warning("news refresh failed", extra={"error": type(e).__name__})
+            return 0

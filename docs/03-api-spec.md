@@ -77,7 +77,7 @@ FastAPI, base `/api/v1`. 인증은 `Authorization: Bearer <JWT>` (단일 사용�
 
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
-| GET | `/judgments?from=&to=&market=&strategy=&outcome=&limit=` | 판단 로그 (signals ⋈ judgments ⋈ llm_verdicts) |
+| GET | `/judgments?from=&to=&market=&strategy=&outcome=&limit=` | 판단 로그 (signals ⋈ judgments ⋈ llm_verdicts) + `rule_unmet`: 기간 안 거래일(시작 시각 기준)의 규칙 미충족 (전략, 종목) 수, 엔진 기록 전이면 `null` (ADR 0027) |
 | GET | `/judgments/{id}` | 상세: state 원문, answers, verdicts, 관련 주문·체결, realized_ret_24h |
 | POST | `/judgments/{id}/ask` | `{question}` → Claude가 state·answers·verdicts를 근거로 답변 `{answer, cost_usd}` (화면 "이 판단에 대해 물어보기") |
 | GET | `/judgments/calibration?weeks=4` | `{brier, ece, n, buckets:[{range, n, hit_rate, avg_conf}], by_provider}` |

@@ -60,6 +60,11 @@ export interface Page<T> {
   next_cursor: string | number | null;
 }
 
+/** GET /judgments — 기간 안의 규칙 미충족 건수를 함께 준다. 엔진 기록 전이면 null (ADR 0027) */
+export interface JudgmentPage extends Page<JudgmentRow> {
+  rule_unmet: number | null;
+}
+
 export interface Verdict {
   id?: number;
   model: string;

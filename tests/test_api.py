@@ -684,6 +684,36 @@ async def test_judgments_log_detail_and_filters(ctx):
     assert (await ctx.client.get(f"{API}/judgments/9999", headers=ctx.h)).status_code == 404
 
 
+async def test_judgments_rule_unmet_by_trading_day(ctx):
+    """규칙 미충족 = 평가했지만 진입 target 없는 (전략, 종목), 업비트 거래일 09:00 KST 시작 기준 (ADR 0027)."""
+    url = f"{API}/judgments"
+    assert (await ctx.client.get(url, headers=ctx.h)).json()["rule_unmet"] is None  # 기록 전 → 숨김
+    link = SettingsEngineLink(SqlConfigRepo(ctx.sessions))
+    five = {"KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL", "KRW-ADA"}
+    await link.merge_rules(
+        UP,
+        {
+            "2026-10-02": {"vol_breakout": {"evaluated": five, "signaled": {"KRW-BTC"}}},
+            "2026-10-03": {"vol_breakout": {"evaluated": five, "signaled": set()}},
+        },
+    )
+    # 재시작한 엔진이 같은 날을 다시 써도 이미 진입한 기록은 합집합으로 남는다
+    await link.merge_rules(
+        UP, {"2026-10-02": {"vol_breakout": {"evaluated": {"KRW-BTC"}, "signaled": set()}}}
+    )
+
+    async def unmet(q: str) -> int | None:
+        return (await ctx.client.get(f"{url}?{q}", headers=ctx.h)).json()["rule_unmet"]
+
+    # 10/3 KST 0시부터: 10/3 거래일(09:00 KST 시작)만 → 5건. 10/2 거래일은 전날 09:00에 시작해 빠진다
+    assert await unmet("from=2026-10-02T15:00:00Z") == 5
+    assert await unmet("from=2026-10-01T15:00:00Z") == 9
+    assert await unmet("from=2026-10-01T15:00:00Z&to=2026-10-03T00:00:00Z") == 4
+    assert await unmet("from=2026-10-01T15:00:00Z&symbol=KRW-BTC") == 1
+    assert await unmet("from=2026-10-01T15:00:00Z&strategy=gem") == 0
+    assert await unmet("from=2026-10-01T15:00:00Z&market=krx") is None
+
+
 async def test_judgment_ask_uses_injected_answerer(ctx):
     jid = await _record_judgment(ctx)
     r = await ctx.client.post(f"{API}/judgments/{jid}/ask", json={"question": "왜?"}, headers=ctx.h)

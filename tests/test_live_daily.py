@@ -113,6 +113,48 @@ def test_one_entry_one_judgment_per_day_and_exit_next_day(engine):
     fills = [e.fill for t, e in bus.events if t == "fill"]
     assert [f.side for f in fills] == [Side.BUY, Side.SELL]
     assert not eng.runner.executor.positions()
+    # 청산 신호는 실제로 보유분이 있던 다음 날 한 번뿐 — 9/29 09:00의 보유 없는 '비중 0'은 남지 않는다 (ADR 0027)
+    kinds = [e.kind for t, e in bus.events if t == "signal"]
+    assert kinds == ["entry", "exit"]
+    rules = eng.runner.rule_days
+    assert rules["2026-09-29"]["vol_breakout"] == {
+        "evaluated": {"KRW-BTC"},
+        "signaled": {"KRW-BTC"},
+    }
+    assert rules["2026-09-30"]["vol_breakout"] == {"evaluated": {"KRW-BTC"}, "signaled": set()}
+
+
+def test_flat_day_without_breakout_records_rule_unmet_only(engine):
+    """돌파가 없고 보유도 없는 날: 신호 0건, 규칙 미충족 1건(BTC)으로만 남는다 (ADR 0027)."""
+    eng, bus, seed = engine
+    p = float(seed["close"].iloc[-1])
+    day = local(2026, 9, 29, 9, 0)
+    _feed(eng, [_minute("KRW-BTC", day + timedelta(minutes=i), p, p, p, p) for i in range(30)])
+    assert not [e for t, e in bus.events if t in ("signal", "judgment", "fill")]
+    rec = eng.runner.rule_days["2026-09-29"]["vol_breakout"]
+    assert rec == {"evaluated": {"KRW-BTC"}, "signaled": set()}
+    assert eng.runner.rule_dirty
+
+
+def test_engine_link_merges_rule_days(engine):
+    """MarketEngine은 바뀐 기록만 우편함에 합쳐 쓰고 dirty를 내린다."""
+    eng, _, seed = engine
+
+    class Link:
+        def __init__(self):
+            self.calls = []
+
+        async def merge_rules(self, market, days):
+            self.calls.append({d: {k: dict(v) for k, v in s.items()} for d, s in days.items()})
+
+    p = float(seed["close"].iloc[-1])
+    _feed(eng, [_minute("KRW-BTC", local(2026, 9, 29, 9, 0), p, p, p, p)])
+    link = Link()
+    eng.link = link
+    asyncio.run(eng._sync_rules(UP))
+    asyncio.run(eng._sync_rules(UP))  # 바뀐 게 없으면 다시 쓰지 않는다
+    assert len(link.calls) == 1 and "2026-09-29" in link.calls[0]
+    assert not eng.runner.rule_dirty
 
 
 def test_no_trading_without_daily_history(monkeypatch, tmp_path):

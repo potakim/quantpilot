@@ -141,6 +141,7 @@ class TickRunner:
 - `on_stop_check`는 체결가마다 돌지만 판단 모델·LLM을 호출하지 않는다. 진입 target의 `stop` 이탈 시 즉시 exit target.
 - `feature_builder`·`pipeline`·`executor`·`risk`·`clock`·`bus`는 `core/ports.py`의 Protocol이다. 봉 히스토리는 `engine/history.py::BarHistory`(백테스트는 미리 적재한 DataFrame의 커서, 실전은 `CandleStore.load`로 시드 후 봉마다 추가).
 - `shadow` executor를 주면 ON이 발행한 전략 신호를 같은 틱에 섀도 계좌로도 낸다(판단은 한 번, 섀도 배수 1.0, 자기 `risk.check → submit`, 손절·시간 청산은 원장별). 섀도 체결은 버스에 발행하지 않는다. 페이퍼 엔진은 항상 섀도를 둔다 (06 §6.2, ADR 0016).
+- 실시간 엔진은 1분봉을 받는다. 일봉·월간 전략은 `engine/daily.py::DailyRollup`이 분봉을 거래일(업비트 09:00 KST) 일봉으로 묶은 표(마지막 행 = 진행 중인 오늘 봉, 시작 시 업비트 REST 일봉 60개로 시드)로 평가하고, (전략, 심볼)마다 거래일당 진입 한 번·청산 한 번만 처리한다 (ADR 0025).
 - 실시간 페이퍼 엔진(`engine/main.py::build_upbit_paper`)의 피처 빌더는 `features/builder.py::FeatureBuilder`다. 뉴스는 `NewsRefresher`가 엔진 타이머에서 DB `news_items`를 5분마다 `NewsCache`로 옮기고, 이벤트는 `QP_EVENTS_FILE` YAML + DART 위험 공시다 (ADR 0021). 판단 모델이 `stub`이면 뉴스는 판단 로그에만 남고 사이징은 바뀌지 않는다.
 - 백테스터는 이 `TickRunner`를 `PaperBroker` + `DirectExecutor` + `StubPipeline(StubJudge, gating=False)` + `ReplayClock` + `UnrestrictedRisk`(기본, `apply_risk=True`면 `RiskManager`)로 돌린다. 0단계 `Backtester.run`의 인라인 루프는 제거했다. 배선 결정과 0단계 대비 수치 차이는 ADR 0010.
 

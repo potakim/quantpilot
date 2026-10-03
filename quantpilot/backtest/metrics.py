@@ -30,19 +30,16 @@ class Metrics:
 
 
 def _periods_per_year(index: pd.DatetimeIndex) -> float:
+    """연환산 계수 = 관측 봉 수 ÷ 달력 연수 (ADR 0023).
+
+    주식 일봉은 ≈252, 연중무휴 코인 일봉은 ≈365, 분봉은 실제 거래 시간만큼이 저절로 나온다.
+    """
     if len(index) < 2:
         return 252.0
-    step = (index[-1] - index[0]) / (len(index) - 1)
-    seconds = step.total_seconds()
-    if seconds <= 0:
+    years = (index[-1] - index[0]).total_seconds() / (365.25 * 24 * 3600)
+    if years <= 0:
         return 252.0
-    return (
-        365.25 * 24 * 3600 / seconds
-        if seconds < 24 * 3600
-        else 252.0
-        if seconds < 5 * 24 * 3600
-        else 12.0
-    )
+    return (len(index) - 1) / years
 
 
 def drawdown(equity: pd.Series) -> pd.Series:

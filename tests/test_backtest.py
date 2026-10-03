@@ -175,3 +175,28 @@ def test_vol_breakout_no_lookahead_on_entry_day():
     ctx = lambda d: Context(d.index[-1], {"A": d}, {}, 1e6)
     t1, t2 = strat.on_bar(ctx(df)), strat.on_bar(ctx(df2))
     assert [(t.weight, t.price) for t in t1] == [(t.weight, t.price) for t in t2]
+
+
+@pytest.mark.parametrize(
+    ("index", "lo", "hi"),
+    [
+        (pd.date_range("2020-01-01", periods=731, freq="D"), 364, 366),  # 코인 일봉 (연중무휴)
+        (pd.bdate_range("2020-01-01", periods=520), 258, 262),  # 주식 일봉 (주말 제외)
+        (pd.date_range("2015-01-31", periods=60, freq="ME"), 11.9, 12.1),  # 월봉
+    ],
+)
+def test_annualization_follows_observed_bars_per_year(index, lo, hi):
+    """연환산 계수는 실제 봉 개수 ÷ 달력 연수다 — 코인 일봉을 252로 세면 샤프가 √(365/252)배 작아진다."""
+    from quantpilot.backtest.metrics import _periods_per_year
+
+    assert lo <= _periods_per_year(index) <= hi
+
+
+def test_crypto_daily_sharpe_uses_365_days():
+    from quantpilot.backtest.metrics import compute
+
+    idx = pd.date_range("2020-01-01", periods=731, freq="D")
+    rets = pd.Series([0.012 if k % 2 else -0.008 for k in range(730)])
+    eq = pd.Series([1e6, *(1e6 * (1 + rets).cumprod())], index=idx)
+    m = compute(eq, [], 0.0, 0.0)
+    assert m.sharpe == pytest.approx(rets.mean() / rets.std() * 365**0.5, rel=2e-3)

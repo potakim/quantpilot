@@ -99,9 +99,40 @@ class MarketEngine:
             groups[b.ts].append(b)
         for ts in sorted(groups):
             if self.store is not None:
-                await self.store.upsert(groups[ts])
+                try:
+                    await self.store.upsert(groups[ts])
+                except Exception as e:  # noqa: BLE001 — 저장 실패로 매매·청산이 멈추면 안 된다 (ADR 0028)
+                    log.error("candle store failed", extra={"error": type(e).__name__})
             await self.runner.on_bars_closed(groups[ts])
         return len(due)
+
+    async def restore(self) -> None:
+        """재시작 직후 상태 복원 (ADR 0028): 계좌 → 월 손실 기준선 → 손절선·오늘 처리 표시."""
+        for ex in (self.runner.executor, getattr(self.runner, "shadow", None)):
+            restore = getattr(getattr(ex, "broker", None), "restore", None)
+            if restore is not None:
+                await restore()
+        market = self.runner.market
+        now = self.clock.now()
+        done = None
+        if self.link is not None:
+            ms = await self.link.month_start(market)
+            month = f"{now.year:04d}-{now.month:02d}"  # RiskManager는 주문 시각(현지)으로 월을 센다
+            if ms and ms.get("month") == month:
+                for risk in self._risks():
+                    risk.month_start_equity = float(ms["equity"])
+                    risk._month = (now.year, now.month)
+            done = await self.link.done(market)
+        self.runner.restore_state(now, done)
+        log.info("engine state restored", extra={"market": market.value})
+
+    def _risks(self) -> list:
+        """ON·섀도 원장의 RiskManager (섀도도 같은 월 기준으로 서킷브레이커를 건다)."""
+        out = [self.runner.risk]
+        shadow = getattr(self.runner, "shadow", None)
+        if shadow is not None and getattr(shadow, "risk", None) is not None:
+            out.append(shadow.risk)
+        return out
 
     async def on_link(self, now: datetime) -> None:
         """하트비트를 쓰고 scheduler의 시간 청산 명령을 처리한다 (link_every초마다)."""
@@ -116,6 +147,7 @@ class MarketEngine:
         market = self.runner.market
         await self.link.beat(market)
         await self._sync_rules(market)
+        await self._sync_done(market, now)
         await self._sync_halt(market)
         await self._sync_prescreen(market)
         for s in self.runner.strategies:
@@ -125,6 +157,13 @@ class MarketEngine:
             log.info("time_exit 명령 처리", extra={"strategy": s.name, "cmd": cmd_id})
             await self.runner.on_time_exit(s.name)
             await self.link.ack_time_exit(market, s.name, cmd_id)
+
+    async def _sync_done(self, market, now: datetime) -> None:
+        """바뀐 오늘 처리 표시를 우편함에 쓴다 — 재시작 뒤 같은 날 다시 사지 않게 (ADR 0028)."""
+        if not getattr(self.runner, "done_dirty", False) or self.runner.daily is None:
+            return
+        await self.link.set_done(market, self.runner.done_today(now))
+        self.runner.done_dirty = False
 
     async def _sync_rules(self, market) -> None:
         """바뀐 규칙 평가 기록(규칙 미충족 집계)을 우편함에 합쳐 쓴다 (ADR 0027)."""
@@ -213,6 +252,7 @@ def build_upbit_paper(
     calendar = EventCalendar.from_yaml(settings.events_file)
     features = FeatureBuilder(market, news=CacheNewsSource(news_cache), events=calendar)
     refresher = None
+    store: CandleStore | None = None
     if sessions is None:
         executor = DirectExecutor(PaperBroker(market, cost, settings.initial_cash_krw), risk)
         # 게이팅 OFF 섀도: 같은 CostModel·같은 규칙의 별도 RiskManager (06 §6.2, ADR 0016)
@@ -254,6 +294,10 @@ def build_upbit_paper(
         from quantpilot.db.news_repo import SqlNewsRepo
 
         refresher = NewsRefresher(SqlNewsRepo(sessions), news_cache, calendar=calendar)
+        from quantpilot.db.repo import SqlCandleRepo
+
+        # 확정 1분봉 저장: 24h 수익률·계좌 평가·화면 시세·09:00 목표가가 candles 표를 읽는다 (ADR 0028)
+        store = CandleStore(SqlCandleRepo(sessions), market)
     bus: object = _LogBus()
     recorder = None
     if hub is not None:
@@ -282,7 +326,13 @@ def build_upbit_paper(
 
         orders = ManualOrderConsumer(hub, runner)
     return MarketEngine(
-        runner, CandleAggregator("1m", market), clock, link=link, orders=orders, news=refresher
+        runner,
+        CandleAggregator("1m", market),
+        clock,
+        store=store,
+        link=link,
+        orders=orders,
+        news=refresher,
     )
 
 
@@ -333,9 +383,7 @@ def main() -> None:
     stream = UpbitStream(symbols, on_trade=engine.on_trade)
 
     async def _run() -> None:
-        await engine.runner.executor.broker.restore()
-        if engine.runner.shadow is not None:
-            await engine.runner.shadow.broker.restore()
+        await engine.restore()
         await engine.run(stream)
 
     asyncio.run(_run())

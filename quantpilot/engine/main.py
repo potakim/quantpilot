@@ -115,6 +115,7 @@ class MarketEngine:
         self._last_link = now
         market = self.runner.market
         await self.link.beat(market)
+        await self._sync_rules(market)
         await self._sync_halt(market)
         await self._sync_prescreen(market)
         for s in self.runner.strategies:
@@ -124,6 +125,13 @@ class MarketEngine:
             log.info("time_exit 명령 처리", extra={"strategy": s.name, "cmd": cmd_id})
             await self.runner.on_time_exit(s.name)
             await self.link.ack_time_exit(market, s.name, cmd_id)
+
+    async def _sync_rules(self, market) -> None:
+        """바뀐 규칙 평가 기록(규칙 미충족 집계)을 우편함에 합쳐 쓴다 (ADR 0027)."""
+        if not getattr(self.runner, "rule_dirty", False):
+            return
+        await self.link.merge_rules(market, self.runner.rule_days)
+        self.runner.rule_dirty = False
 
     async def _sync_halt(self, market) -> None:
         """scheduler(Reconciler)가 건 할트를 RiskManager에 반영한다. 풀리는 건 할트 키가 지워졌을 때만."""

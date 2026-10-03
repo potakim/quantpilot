@@ -1,7 +1,7 @@
 "use client";
 
 // AI 판단 로그 (AILog.dc.html): 보정 카드 4개 → 필터 + 판단 표(선택 행 --ai-bg) + 우측 상세.
-// 표 하단 "규칙 미충족 n건" 문구는 API가 그 수를 주지 않으므로 넣지 않는다 (지어내지 않는다).
+// 표 하단 "규칙 미충족 n건" 문구는 API가 rule_unmet을 줄 때만 보인다 (null이면 숨김 — 지어내지 않는다, ADR 0027).
 import { useState } from "react";
 import { CalibrationCards } from "@/components/judgments/CalibrationCards";
 import { JudgmentDetailPanel } from "@/components/judgments/JudgmentDetailPanel";
@@ -103,6 +103,7 @@ export function JudgmentLog() {
   const strategies = useStrategies();
   const q = useJudgments({ from: from[period], market, strategy, outcome, limit });
   const items = q.data?.items ?? [];
+  const unmet = q.data?.rule_unmet ?? null; // 엔진이 아직 기록하지 않았으면 문구를 숨긴다 (ADR 0027)
   const selected = picked ?? items[0]?.id ?? null;
   const entries = items.filter((j) => j.gate !== "hold").length;
   const now = new Date();
@@ -137,6 +138,7 @@ export function JudgmentLog() {
             <span className="text-xs text-muted" aria-live="polite">
               {PERIOD_LABEL[period]} {items.length}
               {q.data?.next_cursor != null ? "+" : ""}건 · 진입 {entries} · 보류 {items.length - entries}
+              {unmet != null ? ` · 규칙 미충족 ${unmet}` : ""}
             </span>
           </div>
           {q.isLoading ? <CardSkeleton lines={6} className="m-4 border-0 p-0" /> : null}
@@ -196,6 +198,11 @@ export function JudgmentLog() {
                   })}
                 </tbody>
               </table>
+            </div>
+          ) : null}
+          {unmet != null ? (
+            <div className="mt-auto border-t border-line px-4 py-2.5 text-xs text-muted">
+              규칙 미충족 {unmet}건은 판단 모델을 호출하지 않았습니다 (비용 0)
             </div>
           ) : null}
           {q.data?.next_cursor != null && limit < 500 ? (

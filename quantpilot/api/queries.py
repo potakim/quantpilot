@@ -187,6 +187,50 @@ async def judgments(
     return page([_judgment_view(j, sig, name, vs[j.id]) for j, sig, name in rows], limit, "id")
 
 
+async def rule_unmet(
+    sessions: Any,
+    *,
+    frm: str | None,
+    to: str | None,
+    market: str | None,
+    strategy: str | None,
+    symbol: str | None,
+) -> int | None:
+    """규칙 미충족 건수 (ADR 0027): 평가했지만 진입 target을 내지 않은 (전략, 종목), 거래일 단위.
+
+    거래일 시작 시각(업비트는 09:00 KST, 그 밖은 현지 0시)이 [from, to) 안인 거래일만 센다.
+    엔진이 아직 아무것도 쓰지 않았으면 None — 화면은 문구를 숨긴다.
+    """
+    from datetime import timedelta
+
+    from quantpilot.core.clock import UPBIT_DAY_START, to_utc
+    from quantpilot.core.models import Market
+    from quantpilot.db.repo import SqlConfigRepo
+    from quantpilot.engine.link import SettingsEngineLink
+
+    lo, hi = parse_ts(frm), parse_ts(to)
+    link = SettingsEngineLink(SqlConfigRepo(sessions))
+    total: int | None = None
+    for m in Market:
+        if market and m.value != market:
+            continue
+        days = await link.rules(m)
+        if not days:
+            continue
+        total = total or 0
+        start = UPBIT_DAY_START if m == Market.UPBIT else timedelta(0)
+        for day, by_strategy in days.items():
+            begin = to_utc(datetime.fromisoformat(day) + start, m)
+            if (lo and begin < lo) or (hi and begin >= hi):
+                continue
+            for name, rec in by_strategy.items():
+                if strategy and name != strategy:
+                    continue
+                unmet = set(rec.get("evaluated", [])) - set(rec.get("signaled", []))
+                total += len({symbol} & unmet) if symbol else len(unmet)
+    return total
+
+
 async def judgment_detail(sessions: Any, judgment_id: int) -> dict[str, Any] | None:
     """판단 상세: state 원문·answers·verdicts·관련 주문·체결·realized_ret_24h."""
     q = (

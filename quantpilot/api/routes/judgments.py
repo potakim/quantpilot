@@ -59,8 +59,8 @@ async def list_judgments(
     limit: int = 50,
     before: int | None = None,
 ) -> dict[str, Any]:
-    """판단 로그 (signals ⋈ judgments ⋈ llm_verdicts)."""
-    return await queries.judgments(
+    """판단 로그 (signals ⋈ judgments ⋈ llm_verdicts) + 기간 안의 규칙 미충족 건수 (ADR 0027)."""
+    body = await queries.judgments(
         deps.sessions,
         frm=from_,
         to=to,
@@ -71,6 +71,10 @@ async def list_judgments(
         limit=limit,
         before=before,
     )
+    body["rule_unmet"] = await queries.rule_unmet(
+        deps.sessions, frm=from_, to=to, market=market, strategy=strategy, symbol=symbol
+    )
+    return body
 
 
 async def _detail(deps: Deps, judgment_id: int) -> dict[str, Any]:

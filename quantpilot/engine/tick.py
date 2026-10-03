@@ -54,6 +54,7 @@ from quantpilot.engine.history import BarHistory
 from quantpilot.strategies.base import Context, Strategy
 
 log = logging.getLogger(__name__)
+RULE_DAYS = 35  # 규칙 미충족 집계를 남기는 거래일 수 (ADR 0027)
 
 
 @dataclass(frozen=True)
@@ -137,6 +138,9 @@ class TickRunner:
         self._exited: dict[
             tuple[str, str], pd.Timestamp
         ] = {}  # (전략, 심볼) → 청산을 처리한 거래일
+        # 규칙 미충족 집계 (ADR 0027): 거래일 → 전략 → {evaluated: 평가한 종목, signaled: 진입 target 낸 종목}
+        self.rule_days: dict[str, dict[str, dict[str, set[str]]]] = {}
+        self.rule_dirty = False  # MarketEngine이 우편함에 쓴 뒤 False로 돌린다
 
     # ---------- 이벤트 입구 ----------
     async def on_bar_closed(self, ev: BarClosed) -> None:
@@ -183,6 +187,7 @@ class TickRunner:
                 _Candidate(s, t, ctx, self._increases(t, sbars, positions, equity))
                 for t in s.on_bar(ctx) or []
             ]
+            self._note_rules(s, sbars, got, ts)
             cands += [c for c in got if not self._done_today(c, ts)] if self._daily_mode(s) else got
         if not cands:
             return
@@ -263,6 +268,8 @@ class TickRunner:
         s, t = c.strategy, c.target
         if t.weight < 0 and not self.allow_short:
             return
+        if c.ctx is not None and t.weight == 0 and not self._held(t.symbol, books):
+            return  # 보유 없는 원장들에 대한 '비중 0'은 할 일이 없다 — 신호로 남기지 않는다 (ADR 0027)
         on_book = any(b is self._on for b, _ in books)
         kind = "rebalance" if s.timeframe == "1M" else ("entry" if c.grows else "exit")
         signal = SignalEvent(self.market, s.name, t, kind, ts)
@@ -412,6 +419,38 @@ class TickRunner:
             log.debug(msg, extra={"symbol": t.symbol})
             self.warnings.append(msg)
         return float(np.clip(t.price, bar["low"], bar["high"]))
+
+    @staticmethod
+    def _held(symbol: str, books: Sequence[tuple[_Book, float]]) -> bool:
+        """처리할 원장 중 하나라도 이 심볼 포지션을 들고 있는가."""
+        for b, _ in books:
+            pos = b.executor.positions().get(symbol)
+            if pos is not None and pos.is_open:
+                return True
+        return False
+
+    def _note_rules(
+        self,
+        s: Strategy,
+        bars: Mapping[str, pd.DataFrame],
+        got: Sequence[_Candidate],
+        ts: datetime,
+    ) -> None:
+        """거래일별로 평가한 종목과 진입 target을 낸 종목을 모은다 (규칙 미충족 집계, ADR 0027)."""
+        day = (
+            (self.daily.day_of(ts) if self._daily_mode(s) else pd.Timestamp(ts)).date().isoformat()
+        )
+        evaluated = {sym for sym in s.symbols if sym in bars and len(bars[sym]) >= s.warmup_bars}
+        signaled = {c.target.symbol for c in got if c.grows}
+        if day not in self.rule_days:
+            self.rule_days[day] = {}
+            for old in sorted(self.rule_days)[:-RULE_DAYS]:
+                del self.rule_days[old]
+        rec = self.rule_days[day].setdefault(s.name, {"evaluated": set(), "signaled": set()})
+        if not (evaluated <= rec["evaluated"] and signaled <= rec["signaled"]):
+            rec["evaluated"] |= evaluated
+            rec["signaled"] |= signaled
+            self.rule_dirty = True
 
     def _daily_mode(self, s: Strategy) -> bool:
         """실시간 분봉으로 일봉·월간 전략을 돌리는 중인가 (ADR 0025)."""

@@ -107,3 +107,25 @@ class SettingsEngineLink:
         if not raw:
             return None
         return str(raw.get("day", "")), dict(raw.get("blocked") or {})
+
+    @staticmethod
+    def _rules_key(market: Market) -> str:
+        return f"engine.rules.{Market(market).value}"
+
+    async def merge_rules(
+        self, market: Market, days: dict[str, dict[str, dict[str, set[str]]]], keep: int = 35
+    ) -> None:
+        """거래일별 규칙 평가 기록을 저장된 값과 합집합으로 합쳐 쓴다 (ADR 0027). 최근 keep일만 남긴다."""
+        stored = await self.rules(market)
+        for day, by_strategy in days.items():
+            for name, rec in by_strategy.items():
+                cur = stored.setdefault(day, {}).setdefault(name, {})
+                for k in ("evaluated", "signaled"):
+                    cur[k] = sorted(set(cur.get(k, [])) | set(rec.get(k, ())))
+        kept = {d: stored[d] for d in sorted(stored)[-keep:]}
+        await self.config.set_setting(self._rules_key(market), {"days": kept})
+
+    async def rules(self, market: Market) -> dict[str, dict[str, dict[str, list[str]]]]:
+        """저장된 거래일별 규칙 평가 기록 {day: {strategy: {evaluated, signaled}}}. 없으면 빈 dict."""
+        raw = await self.config.get_setting(self._rules_key(market))
+        return dict((raw or {}).get("days") or {})

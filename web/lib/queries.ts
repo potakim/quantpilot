@@ -12,7 +12,7 @@ import type {
   Gates,
   Health,
   JudgmentDetail,
-  JudgmentRow,
+  JudgmentPage,
   OrderRow,
   Page,
   Portfolio,
@@ -70,7 +70,7 @@ export interface JudgmentFilter {
 export const useJudgments = (f: JudgmentFilter) =>
   useQuery({
     queryKey: ["judgments", f],
-    queryFn: () => apiFetch<Page<JudgmentRow>>(`/judgments${qs({ ...f })}`),
+    queryFn: () => apiFetch<JudgmentPage>(`/judgments${qs({ ...f })}`),
   });
 
 export const useJudgment = (id: number | null) =>

@@ -129,7 +129,7 @@ async def run_job(deps: Deps, pool: Any, bid: int, req: BacktestRequest) -> None
     path = Path(deps.settings.data_dir) / "backtests" / f"{bid}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     blob = {k: out[k] for k in ("equity", "fills", "warnings", "attempts")}
-    path.write_text(json.dumps(blob, ensure_ascii=False, default=str))
+    path.write_text(json.dumps(blob, ensure_ascii=False, default=str), encoding="utf-8")
     eq = out["equity"]
     async with deps.sessions.begin() as s:
         row = await s.get_one(BacktestRow, bid)
@@ -207,7 +207,9 @@ async def _row_and_blob(deps: Deps, bid: int) -> tuple[dict[str, Any], dict[str,
     if row is None:
         raise ApiError(404, "NOT_FOUND", f"백테스트 없음: {bid}")
     path = row.get("equity_path")
-    blob = json.loads(Path(path).read_text()) if path and Path(path).exists() else None
+    blob = (
+        json.loads(Path(path).read_text(encoding="utf-8")) if path and Path(path).exists() else None
+    )
     return row, blob
 
 

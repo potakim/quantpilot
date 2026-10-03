@@ -22,6 +22,9 @@ COMPOSE = ROOT / "deploy" / "compose.yml"
 APP_SERVICES = ("migrate", "api", "scheduler", "engine")
 BASH = shutil.which("bash")
 needs_bash = pytest.mark.skipif(BASH is None, reason="bash 필요")
+posix_only = pytest.mark.skipif(
+    os.name == "nt", reason="Git Bash tar가 C: 경로를 원격 호스트로 해석한다 (배포는 리눅스)"
+)
 
 
 @pytest.fixture(scope="module")
@@ -191,6 +194,7 @@ def test_deploy_dry_run_order(tmp_path):
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     cmds = [ln for ln in r.stdout.splitlines() if ln.startswith("+ ")]
@@ -209,6 +213,7 @@ def test_deploy_dry_run_with_web(tmp_path):
         [BASH, str(ROOT / "scripts/deploy.sh"), "--dry-run", "--web", "--env-file", str(env)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     cmds = [ln for ln in r.stdout.splitlines() if ln.startswith("+ ")]
@@ -236,6 +241,7 @@ def test_deploy_requires_env_file(tmp_path):
         [BASH, str(ROOT / "scripts/deploy.sh"), "--dry-run", "--env-file", str(tmp_path / "no")],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     assert r.returncode == 2
@@ -245,6 +251,7 @@ def test_deploy_requires_env_file(tmp_path):
 
 
 @needs_bash
+@posix_only
 def test_backup_sqlite_excludes_keys(tmp_path):
     data = tmp_path / "data"
     (data / "cache").mkdir(parents=True)
@@ -266,6 +273,7 @@ def test_backup_sqlite_excludes_keys(tmp_path):
         + ["--out", str(out), "--keep-days", "30"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env={**os.environ, "PYTHON": sys.executable},
         check=False,
     )

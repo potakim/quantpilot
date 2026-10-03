@@ -203,11 +203,11 @@ class KeysRequest(BaseModel):
 def write_keys_file(path: Path, values: dict[str, str]) -> None:
     """QP_<NAME>=값 줄을 쓰거나 바꾼다. 파일 권한 0600."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    lines = path.read_text().splitlines() if path.exists() else []
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     names = {f"QP_{k.upper()}" for k in values}
     kept = [ln for ln in lines if ln.split("=", 1)[0].strip() not in names]
     kept += [f"QP_{k.upper()}={v}" for k, v in sorted(values.items())]
-    path.write_text("\n".join(kept) + "\n")
+    path.write_text("\n".join(kept) + "\n", encoding="utf-8")
     os.chmod(path, 0o600)
 
 

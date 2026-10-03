@@ -71,12 +71,12 @@ def _collector(pages, repo=None, summarizer=None, feeds=None, **kw):
 
 # ---------- 파싱 ----------
 def test_parse_rss_and_atom():
-    rss = parse_rss((FIX / "rss.xml").read_text(), "coin", fetched_at=NOW)
+    rss = parse_rss((FIX / "rss.xml").read_text(encoding="utf-8"), "coin", fetched_at=NOW)
     assert len(rss) == 5
     assert rss[0].ts == datetime(2026, 9, 30, 1, 0, tzinfo=UTC)
     assert rss[1].ts == datetime(2026, 9, 29, 17, 30, tzinfo=UTC)  # +0900 → UTC
     assert rss[0].url == "https://news.example.com/a1"
-    atom = parse_rss((FIX / "atom.xml").read_text(), "wire", fetched_at=NOW)
+    atom = parse_rss((FIX / "atom.xml").read_text(encoding="utf-8"), "wire", fetched_at=NOW)
     assert [(a.title, a.url, a.ts) for a in atom] == [
         (
             "Ethereum hard fork scheduled",
@@ -93,7 +93,9 @@ def test_parse_rss_rejects_entity_declarations():
 
 
 def test_parse_dart_maps_stock_codes_and_kst_date():
-    items = parse_dart((FIX / "dart_list.json").read_text(), "dart", stock_symbols=STOCKS)
+    items = parse_dart(
+        (FIX / "dart_list.json").read_text(encoding="utf-8"), "dart", stock_symbols=STOCKS
+    )
     assert [i.symbols for i in items] == [["005930"], ["123456"], []]
     assert items[0].ts == datetime(2026, 9, 29, 15, 0, tzinfo=UTC)  # 2026-09-30 00:00 KST
     assert items[0].url.endswith("rcpNo=20260930800001")
@@ -115,7 +117,7 @@ def test_raw_hash_normalizes_whitespace_and_case():
 
 def test_dedup_within_batch_and_across_runs_before_summarizing():
     """같은 배치의 중복·이미 저장된 뉴스는 요약기를 부르지 않는다."""
-    pages = {"https://rss/coin": (FIX / "rss.xml").read_text()}
+    pages = {"https://rss/coin": (FIX / "rss.xml").read_text(encoding="utf-8")}
     summ = CountingSummarizer()
     repo = NewsCache()
     first = asyncio.run(_collector(pages, repo, summ).collect(NOW))
@@ -135,13 +137,13 @@ def test_dedup_within_batch_and_across_runs_before_summarizing():
 
 
 def test_old_news_is_ignored():
-    pages = {"https://rss/coin": (FIX / "rss.xml").read_text()}
+    pages = {"https://rss/coin": (FIX / "rss.xml").read_text(encoding="utf-8")}
     out = asyncio.run(_collector(pages).collect(NOW + timedelta(days=3)))
     assert out == []
 
 
 def test_feed_failure_is_isolated_and_key_not_logged(caplog):
-    pages = {"https://rss/coin": (FIX / "rss.xml").read_text()}
+    pages = {"https://rss/coin": (FIX / "rss.xml").read_text(encoding="utf-8")}
     feeds = [Feed("coin", "https://rss/coin"), Feed("dart", DART_LIST_URL, "dart")]
     with caplog.at_level(logging.DEBUG):
         out = asyncio.run(_collector(pages, feeds=feeds).collect(NOW))
@@ -160,7 +162,9 @@ def test_dart_feed_passes_key_as_param_and_matches_symbols():
         NewsCache(),
         stock_symbols=STOCKS,
         dart_api_key=SECRET,
-        fetch=fake_fetch({DART_LIST_URL: (FIX / "dart_list.json").read_text()}, seen),
+        fetch=fake_fetch(
+            {DART_LIST_URL: (FIX / "dart_list.json").read_text(encoding="utf-8")}, seen
+        ),
     )
     out = asyncio.run(c.collect(NOW))
     assert sorted(i.symbols[0] for i in out) == ["005930", "123456"]
@@ -197,7 +201,9 @@ def test_calendar_yaml_and_dart_events(tmp_path):
     assert cal.within("KRW-ETH", NOW, NOW + timedelta(days=3)) == []
     assert [e.kind for e in cal.within("KRW-ETH", NOW, NOW + timedelta(days=40))] == ["fomc"]
 
-    dart = parse_dart((FIX / "dart_list.json").read_text(), "dart", stock_symbols=STOCKS)
+    dart = parse_dart(
+        (FIX / "dart_list.json").read_text(encoding="utf-8"), "dart", stock_symbols=STOCKS
+    )
     added = cal.add(events_from_dart(dart))
     assert added == 2 and cal.add(events_from_dart(dart)) == 0
     kinds = {e.symbols: e.kind for e in cal.within("123456", NOW - timedelta(days=1), NOW)}
@@ -247,7 +253,7 @@ async def test_sql_news_repo_dedup_and_roundtrip(sessions):
 
 
 async def test_collector_with_sql_repo(sessions):
-    pages = {"https://rss/coin": (FIX / "rss.xml").read_text()}
+    pages = {"https://rss/coin": (FIX / "rss.xml").read_text(encoding="utf-8")}
     repo = SqlNewsRepo(sessions)
     assert len(await _collector(pages, repo).collect(NOW)) == 3
     assert await _collector(pages, repo).collect(NOW) == []

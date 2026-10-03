@@ -60,7 +60,7 @@ class Strategy(ABC):
     timeframe: str = "1d"  # "1d" | "5m" | "1M"(월간 판단)
     horizon: str = "swing"  # "intraday" | "swing" | "long"  (단타 합산 상한 20% 적용 대상 구분)
     symbols: tuple[str, ...] = ()
-    warmup_bars: int = 30  # 이만큼 봉이 쌓이기 전에는 on_bar를 호출하지 않는다
+    warmup_bars: int = 30  # 심볼 하나라도 이만큼 쌓여야 on_bar를 부른다. 심볼별 확인은 전략이 한다
 
     def __init__(self, **params: Any):
         schema = {p.name: p for p in self.params_schema()}

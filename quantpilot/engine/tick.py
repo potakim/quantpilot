@@ -153,7 +153,8 @@ class TickRunner:
                 raise ValueError(f"{self.market.value} TickRunner에 {ev.market} 봉")
             if ev.ts != ts:
                 raise ValueError(f"한 묶음의 봉 시각이 다르다: {ts} vs {ev.ts}")
-        # 1. 봉 반영
+        # 1. 봉 반영 — 지정가 진입의 사이징 기준(보유분의 직전 가격)은 이 봉 종가를 반영하기 전에 잡아 둔다
+        prev_marks = {id(b): self._marks(b.executor) for b in self._books()}
         for ev in evs:
             self.history.append(ev)
             if self.daily is not None and ev.timeframe != "1d":
@@ -197,17 +198,31 @@ class TickRunner:
             cands = [c for c in cands if not c.grows]
 
         # 청산 우선 정렬 (안정 정렬)
-        cands.sort(key=lambda c: c.grows)
+        # 전량 청산(비중 0) → 그 밖의 축소 → 늘리기. 같은 날 '청산 후 재진입'의 진입은 평가 시점에 보유분이
+        # 남아 있어 축소로 분류되므로, 전량 청산을 그보다 먼저 처리해야 진입 기준 평가액이 청산을 반영한다
+        cands.sort(key=lambda c: 0 if c.target.weight == 0 else (2 if c.grows else 1))
+        entry_equity: dict[int, float] = {}  # 지정가 진입 사이징 기준 — 이 봉에서 한 번만 잡는다
         for c in cands:
             t = c.target
             if t.symbol not in bars or self.history.last_ts(t.symbol) != pd.Timestamp(ts):
                 continue  # 이 봉에 데이터 없는 심볼
+            if c.ctx is not None:
+                # 진입 여부는 앞서 처리한 청산을 반영해 다시 본다. 평가 시점에는 어제 산 보유분이 남아 있어
+                # 같은 날 '청산 후 재진입'의 진입이 진입으로 분류되지 않고 판단 모델·사이징 규칙을 건너뛰었다
+                now_pos = dict(self.executor.positions())
+                c = replace(
+                    c, grows=self._increases(t, c.ctx.bars, now_pos, equities[id(self._on)])
+                )
             if self._daily_mode(c.strategy):
                 self._mark_done(c, ts)
             # 체결 기준가는 전략이 본 봉(일봉 모드면 진행 중인 오늘 봉)의 범위 안에서 정한다
             bar = c.ctx.bars[t.symbol].iloc[-1] if c.ctx is not None else bars[t.symbol].iloc[-1]
             ref = self._ref_price(t, bar, ts)
-            await self._act(c, ref, ts, [(b, equities[id(b)]) for b in self._books()])
+            books = [
+                (b, self._sizing_equity(b, c, equities, prev_marks, entry_equity))
+                for b in self._books()
+            ]
+            await self._act(c, ref, ts, books)
 
     async def on_time_exit(self, strategy_name: str) -> None:
         """scheduler가 호출. 그 전략의 열린 포지션을 전부 시장가 청산한다 (판단 모델 없음)."""
@@ -418,9 +433,51 @@ class TickRunner:
 
     @staticmethod
     def _ready(s: Strategy, bars: Mapping[str, pd.DataFrame]) -> bool:
-        if not any(sym in bars for sym in s.symbols):
-            return False
-        return all(len(v) >= s.warmup_bars for sym, v in bars.items() if sym in s.symbols)
+        """전략 심볼 중 하나라도 준비 기간을 채웠으면 평가한다 (ADR 0026).
+
+        심볼별 준비 여부는 전략이 확인한다. 전부를 기다리면 새로 상장한 심볼 하나 때문에 다른 심볼까지 멈춘다.
+        """
+        return any(len(bars[sym]) >= s.warmup_bars for sym in s.symbols if sym in bars)
+
+    @staticmethod
+    def _marks(ex: OrderExecutor) -> dict[str, float]:
+        """보유 심볼의 현재 평가 가격 (봉 반영 전 = 직전 가격)."""
+        out: dict[str, float] = {}
+        for sym, p in ex.positions().items():
+            if p.is_open:
+                try:
+                    out[sym] = ex.last_price(sym)
+                except KeyError:
+                    continue
+        return out
+
+    @staticmethod
+    def _sizing_equity(
+        b: _Book,
+        c: _Candidate,
+        equities: Mapping[int, float],
+        prev_marks: Mapping[int, dict],
+        entry_equity: dict[int, float],
+    ) -> float:
+        """사이징 기준 평가액 (ADR 0026).
+
+        지정가(Target.price) 진입은 장중 그 가격에 닿는 순간의 결정이므로, 이 봉의 종가를 쓰면 룩어헤드다.
+        그래서 이 봉의 청산을 모두 처리한 직후의 현금 + 남은 보유분 × 직전 가격을 한 번 잡아, 그 봉의
+        모든 지정가 진입이 같은 값을 쓴다 (먼저 산 심볼의 오늘 종가가 다음 심볼 크기에 섞이지 않게).
+        종가 체결(price=None)과 청산은 종가 시점의 결정이라 틱 시작 평가액(종가 반영)을 그대로 쓴다.
+        """
+        if not c.grows or c.target.price is None:
+            return equities[id(b)]
+        if (
+            id(b) not in entry_equity
+        ):  # 이 봉의 첫 지정가 진입 = 청산은 모두 끝났고 진입은 아직 없다
+            ex, prev = b.executor, prev_marks[id(b)]
+            entry_equity[id(b)] = ex.cash() + sum(
+                p.qty * prev.get(sym, ex.last_price(sym))
+                for sym, p in ex.positions().items()
+                if p.is_open
+            )
+        return entry_equity[id(b)]
 
     @staticmethod
     def _increases(

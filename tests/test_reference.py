@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from pathlib import Path
 
 import pandas as pd
@@ -32,7 +33,7 @@ def test_reference_does_not_reuse_strategy_or_engine_code():
 
 
 def test_engine_matches_reference_vol_breakout_on_synthetic():
-    """같은 데이터·같은 비용에서 엔진과 독립 구현이 G1 허용 범위(±10%, 진입 ±3%) 안이다."""
+    """같은 데이터·같은 비용에서 엔진과 독립 구현이 체결 단위로 같다 (ADR 0026 이후 완전 일치)."""
     data = S.universe(SYMS, periods=900, start="2019-01-01", vol=0.04)
     strat = create("vol_breakout")
     strat.symbols = SYMS
@@ -42,11 +43,58 @@ def test_engine_matches_reference_vol_breakout_on_synthetic():
         data, fee_rate=cost.fee_rate, slippage_rate=cost.slippage_rate
     )
     entries = sum(1 for f in res.fills if f.side == Side.BUY)
-    assert ref_entries > 50
-    assert within(entries, ref_entries, 0.03)
-    # 합성 데이터는 CAGR이 0 근처라 상대 오차 대신 최종 자산 비율로 본다
-    assert within(res.equity.iloc[-1], ref_eq.iloc[-1], 0.01)
-    assert within(max_drawdown(res.equity), max_drawdown(ref_eq), 0.10)
+    assert ref_entries > 50 and entries == ref_entries
+    pd.testing.assert_series_equal(
+        res.equity.astype(float), ref_eq, check_names=False, check_freq=False, rtol=1e-9
+    )
+
+
+def test_engine_matches_reference_with_staggered_listing():
+    """늦게 상장한 심볼이 준비 기간을 채우는 동안에도 다른 심볼은 매매한다 (ADR 0026)."""
+    early = S.daily(1, periods=400, start="2020-01-01", vol=0.04)
+    late = S.daily(2, periods=200, start="2020-07-19", vol=0.04)  # 같은 날 끝나도록 나중에 시작
+    data = {"KRW-BTC": early, "KRW-SOL": late}
+    strat = create("vol_breakout")
+    strat.symbols = tuple(data)
+    res = Backtester(preset(strat.market), holdout_months=0).run(strat, data)
+    ref_eq, ref_entries = reference_vol_breakout(data)
+    listed = late.index[0]
+    warm = late.index[strat.warmup_bars]
+    btc_during_warmup = [
+        f
+        for f in res.fills
+        if f.symbol == "KRW-BTC" and f.side == Side.BUY and listed <= pd.Timestamp(f.ts) < warm
+    ]
+    assert btc_during_warmup  # SOL 준비 기간에도 BTC는 진입한다
+    assert sum(1 for f in res.fills if f.side == Side.BUY) == ref_entries
+    assert res.equity.iloc[-1] == pytest.approx(ref_eq.iloc[-1], rel=1e-9)
+
+
+def test_same_day_reentry_is_judged_as_entry(monkeypatch):
+    """어제 산 것을 오늘 시가에 팔고 다시 돌파하면, 그 매수도 진입으로 판단 파이프라인을 거친다.
+
+    평가 시점엔 어제 보유분이 남아 있어 '비중 축소'로 분류돼 판단 모델을 건너뛰던 문제의 회귀 방지.
+    """
+    from quantpilot.judgment.stub import StubPipeline
+
+    calls = []
+    orig = StubPipeline.evaluate
+
+    async def spy(self, signal, state):
+        calls.append(signal.target.symbol)
+        return await orig(self, signal, state)
+
+    monkeypatch.setattr(StubPipeline, "evaluate", spy)
+    data = {"KRW-BTC": S.daily(3, periods=300, start="2020-01-01", vol=0.05)}
+    strat = create("vol_breakout")
+    strat.symbols = ("KRW-BTC",)
+    res = Backtester(preset(strat.market), holdout_months=0).run(strat, data)
+    buys = [f for f in res.fills if f.side == Side.BUY]
+    days = [pd.Timestamp(f.ts).normalize() for f in buys]
+    assert any(
+        b - a == pd.Timedelta(days=1) for a, b in itertools.pairwise(days)
+    )  # 연속 진입이 있다
+    assert len(calls) == len(buys)
 
 
 def test_reference_sizes_on_open_not_close():

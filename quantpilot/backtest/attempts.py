@@ -18,7 +18,9 @@ class AttemptTracker:
     def __init__(self, path: Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._data: dict = json.loads(self.path.read_text()) if self.path.exists() else {}
+        self._data: dict = (
+            json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {}
+        )
 
     @staticmethod
     def _key(params: dict) -> str:
@@ -33,7 +35,9 @@ class AttemptTracker:
         if key not in entry["attempts"]:
             entry["attempts"][key] = {"params": params, "universe": list(universe), "at": now}
         entry["first"] = entry["first"] or now
-        self.path.write_text(json.dumps(self._data, indent=2, ensure_ascii=False, default=str))
+        self.path.write_text(
+            json.dumps(self._data, indent=2, ensure_ascii=False, default=str), encoding="utf-8"
+        )
         n = len(entry["attempts"])
         return {
             "strategy": strategy,

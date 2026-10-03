@@ -72,7 +72,7 @@ app/scripts/deploy.sh
 | `QP_TELEGRAM_BOT_TOKEN`, `QP_TELEGRAM_CHAT_ID` | 알림 |
 | `QP_AI_BUDGET_USD_DAILY` | 기본 2 |
 | `QP_NEWS_FILE` | 뉴스 피드·키워드 YAML. 비우면 패키지 기본값 `quantpilot/data/news_sources.yaml` (ADR 0021) |
-| `QP_EVENTS_FILE` | 수동 이벤트 캘린더 YAML(FOMC·업비트 점검 등). 기본 `data/events.yaml`, 없으면 빈 캘린더 |
+| `QP_EVENTS_FILE` | 이벤트 캘린더 YAML(FOMC·CPI·금통위·업비트 점검). paper compose는 저장소의 `deploy/events.yaml`을 `/app/config/events.yaml`로 꽂고 이 값을 고정한다 — 일정 갱신은 그 파일을 PR로 고친다. 로컬 기본 `data/events.yaml`, 없으면 빈 캘린더 |
 | `QP_UPBIT_*`, `QP_KIS_*`, `QP_ALPACA_*`, `QP_TYPESAFE_API_KEY`, `QP_ANTHROPIC_API_KEY`, `QP_GOOGLE_API_KEY`, `QP_DART_API_KEY` | 외부 키. Gemini 키가 없으면 뉴스 요약은 제목 절단, Claude 키가 없으면 일일 리뷰는 통계만 (ADR 0021) |
 
 키는 VPS의 `/opt/quantpilot/.env`(권한 600)에만. 화면의 "설정 > API 키"는 `.env`를 쓰지 않고 DB `settings`에 암호화(Fernet, 키는 `QP_SECRET_KEY`) 저장하며, 값은 절대 반환하지 않고 "등록됨/미등록"만 보여준다. 업비트 키는 **출금 권한 제외**, KIS는 모의·실전 앱키 분리.

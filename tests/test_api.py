@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -325,9 +326,10 @@ async def test_invariant10_keys_are_stored_but_never_returned(ctx, caplog):
     r = await ctx.client.post(f"{API}/settings/keys", json=body, headers=ctx.h)
     assert r.status_code == 200, r.text
     assert r.json()["stored"] == ["upbit_secret_key"] and r.json()["restart_required"]
-    text = ctx.settings.keys_file.read_text()
+    text = ctx.settings.keys_file.read_text(encoding="utf-8")
     assert f"QP_UPBIT_SECRET_KEY={key_value}" in text
-    assert oct(ctx.settings.keys_file.stat().st_mode)[-3:] == "600"
+    if os.name != "nt":  # Windows에는 POSIX 권한 비트가 없다
+        assert oct(ctx.settings.keys_file.stat().st_mode)[-3:] == "600"
     bad = await ctx.client.post(
         f"{API}/settings/keys",
         json={"keys": {"jwt_secret": "x"}, "confirm_password": PASSWORD},

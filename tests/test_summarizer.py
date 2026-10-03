@@ -13,7 +13,9 @@ import pytest
 from quantpilot.core.news import RISK_FLAGS, SUMMARY_MAX_CHARS, Summary
 from quantpilot.judgment.google import GeminiSummarizer, parse_summary
 
-RESPONSES = json.loads((Path(__file__).parent / "fixtures/news/gemini_responses.json").read_text())
+RESPONSES = json.loads(
+    (Path(__file__).parent / "fixtures/news/gemini_responses.json").read_text(encoding="utf-8")
+)
 TITLE = "이더리움 거래소 해킹 의혹, 입출금 중단"
 SECRET = "google-secret-key-xyz"
 

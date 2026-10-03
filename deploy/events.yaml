@@ -1,0 +1,27 @@
+# 이벤트 캘린더 (data/events.py::EventCalendar, 04 §3) — compose가 /app/config/events.yaml로 꽂는다.
+# 피처 빌더는 진입 시각 앞뒤 24시간 안의 항목을 state의 events_24h에 넣고, 08:10 사전 심사도 이를 본다.
+#
+# 형식: ts(현지 시각, market으로 시간대 지정 — 서머타임은 core/clock.py가 처리), kind, title,
+#       symbols(비우면 모든 종목).  2026-10-03 작성, 출처별 확인 범위는 각 절 주석.
+# 갱신: 새 일정이 공개되면 이 파일을 PR로 고친다. 업비트 점검 공지도 여기에 (kind: exchange_maintenance).
+
+events:
+  # ── FOMC 결과 발표 ─────────────────────────────────────────────
+  # 날짜: https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm (2026-10-03 확인)
+  # 시각 14:00 ET: 2026-09-16 성명서 "For release at 2:00 p.m." 관행 (이후 회의는 추정)
+  - {ts: "2026-10-28 14:00", market: us, kind: fomc, title: FOMC 금리 결정}
+  - {ts: "2026-12-09 14:00", market: us, kind: fomc, title: FOMC 금리 결정 (경제전망 포함)}
+  - {ts: "2027-01-27 14:00", market: us, kind: fomc, title: FOMC 금리 결정}
+  - {ts: "2027-03-17 14:00", market: us, kind: fomc, title: FOMC 금리 결정 (경제전망 포함)}
+
+  # ── 미국 CPI 발표 (08:30 ET) ──────────────────────────────────
+  # https://www.bls.gov/schedule/news_release/cpi.htm (2026-10-03 확인). 2027년 일정은 미공개
+  - {ts: "2026-10-14 08:30", market: us, kind: cpi, title: 미국 9월 CPI}
+  - {ts: "2026-11-10 08:30", market: us, kind: cpi, title: 미국 10월 CPI}
+  - {ts: "2026-12-10 08:30", market: us, kind: cpi, title: 미국 11월 CPI}
+
+  # ── 한국은행 금통위 기준금리 결정 ──────────────────────────────
+  # 날짜: https://www.bok.or.kr (통화정책방향 결정회의 일정, 2026-10-03 확인). 2027년 일정은 미공개
+  # 발표 시각은 확인하지 못해 날짜 00:00(KST)로 둔다 — 앞뒤 24시간 창이라 그날 진입 판단에는 잡힌다
+  - {ts: "2026-10-22", market: krx, kind: bok_rate, title: 한국은행 기준금리 결정}
+  - {ts: "2026-11-26", market: krx, kind: bok_rate, title: 한국은행 기준금리 결정}

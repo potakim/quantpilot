@@ -6,45 +6,51 @@
 
 **설계 문서는 [`docs/00-overview.md`](docs/00-overview.md)부터.** 작업 지침은 [`CLAUDE.md`](CLAUDE.md), 1단계 작업 분해는 [`docs/09-phase1-workplan.md`](docs/09-phase1-workplan.md).
 
-## 현재 상태: 0단계 (기반 구축)
+## 현재 상태: 1단계 개발 완료 · 코인 페이퍼 운영 준비
 
-| 모듈 | 상태 | 위치 |
+1단계 이슈 P1-01~P1-14와 후속 카드는 모두 `main`에 들어왔다. 진행 기록은 `docs/09-phase1-workplan.md`와 ADR(`docs/adr/`)에 있다.
+
+| 영역 | 상태 | 위치 |
 | --- | --- | --- |
-| 전략 플러그인 인터페이스 + 4개 전략 (변동성 돌파·GEM·GTAA·ORB) | 완료 | `quantpilot/strategies/` |
-| 백테스터 (비용 모델 강제 · 12개월 홀드아웃 · 파라미터 시도 카운터) | 완료 | `quantpilot/backtest/` |
-| PaperBroker + RiskManager (1% 룰 · 월 −5% 서킷브레이커 · 비중 25% · 단타 20% · 자전거래 방지) | 완료 | `quantpilot/execution/` |
-| 판단 계층 인터페이스 + 스텁 (JudgeProvider / LLMProvider / 확신도 게이팅 / 2모델 합의) | 완료 (스텁) | `quantpilot/judgment/` |
-| 데이터 로더 (업비트 REST · yfinance · FDR) + 캐시 | 완료 (실데이터 미검증) | `quantpilot/data/` |
-| FastAPI (전략·백테스트·페이퍼·판단 미리보기) | 완료 (미실행) | `quantpilot/api/` |
-| Next.js 프론트 · TimescaleDB · Redis · 스케줄러 · 실전 어댑터 | 1~2단계 | — |
+| 전략 4개 (변동성 돌파·GEM·GTAA·ORB) | 백테스트 모두 가능. **실시간은 변동성 돌파(업비트 페이퍼)만** — KRX·미국 엔진과 KIS·Alpaca 어댑터는 2단계 | `quantpilot/strategies/` |
+| 백테스터 | `TickRunner`로 실전과 같은 루프, 비용 모델 강제, 12개월 홀드아웃, 시도 카운터 | `quantpilot/backtest/`, `quantpilot/engine/` |
+| 실행 | 영속 PaperBroker · OrderExecutor · RateLimiter · RiskManager · Reconciler | `quantpilot/execution/` |
+| 판단 계층 | TypeSafe Jev 어댑터, Claude·Gemini 리뷰어, 게이팅, 08:10 사전 심사. **기본값은 스텁**(`QP_JUDGE_PROVIDER=stub`, 판단은 기록만) | `quantpilot/judgment/` |
+| 뉴스·이벤트 | RSS·DART 수집 → DB → 엔진 판단 입력 (ADR 0021) | `quantpilot/data/news.py`, `quantpilot/features/` |
+| 엔진·스케줄러·API·화면 | 업비트 웹소켓 엔진, APScheduler 잡, API v1 + WS + JWT, Next.js 대시보드·거래·AI 판단 로그·모바일 | `quantpilot/engine/`, `scheduler/`, `api/`, `web/` |
+| 운영 | paper compose, 배포 가드, 백업, CI(pytest·ruff·web·이미지) | `deploy/`, `scripts/`, `.github/workflows/` |
 
-관문 **G1** (비용 포함 백테스트가 공개 수치 ±20% 이내 재현) 은 실데이터를 받은 뒤 확인한다.
+아직 확인하지 않은 것: 실제 API 키로의 외부 호출(TypeSafe·Anthropic·Gemini·DART·텔레그램), VPS에서의 TimescaleDB·2프로세스 종단 실행, 관문 G1(실데이터 첫 실행은 미달 — 비교 기간 보정 진행 중).
 
-## 시작하기 (Windows, PowerShell)
+## 시작하기 (Linux · WSL)
 
-```powershell
-cd E:\claude\project\AiTrading\quantpilot
-uv venv                              # 없으면: pip install uv
-.venv\Scripts\activate
-uv pip install -e ".[data,dev]"      # 코어 + 데이터 로더 + pytest
-pytest                               # 23개 테스트
+배포 서버와 CI는 리눅스다. Windows에서는 WSL에서 작업하는 것을 권장한다(네이티브 Windows에서도 테스트는 돌지만, 백업 스크립트처럼 POSIX 전용 테스트는 건너뛴다).
+
+```bash
+uv venv && source .venv/bin/activate      # 없으면: pip install uv
+uv pip install -e ".[data,dev]"           # 코어 + 데이터 로더 + 테스트 (실행 환경은 .[data,infra,ai])
+pytest -q                                  # 네트워크 테스트는 기본 제외 (-m network)
+ruff check . && ruff format --check .
 
 # 합성 데이터로 파이프라인 확인
 qp backtest gem
 qp backtest vol_breakout -p k=0.6
-qp judge --news "상장폐지 검토"      # AI 판단 스텁: hard block → 보류
+qp judge --news "상장폐지 검토"           # 스텁 판단: hard block → 보류
 
 # 실데이터 (인터넷 필요)
-qp fetch upbit KRW-BTC KRW-ETH KRW-SOL KRW-XRP KRW-ADA --count 3000
+qp fetch upbit KRW-BTC KRW-ETH KRW-SOL KRW-XRP KRW-ADA --count 3500
 qp fetch yfinance SPY ACWX AGG BIL --start 2005-01-01
 qp backtest vol_breakout --source upbit
-qp backtest gem --source yfinance
+python scripts/verify_g1.py                # 관문 G1
 
-# API 서버
-qp serve --reload                    # http://127.0.0.1:8000/docs
+# 게이팅 A/B 리포트 (관문 G2, 페이퍼 운영 기록 필요)
+qp report ab --weeks 4
+
+# API 서버 (개발용)
+qp serve --reload                          # http://127.0.0.1:8000/docs
 ```
 
-Docker(TimescaleDB·Redis 포함)는 `docker compose up -d` — 1단계에서 실제로 쓰기 시작한다.
+실행 프로세스는 `api`·`engine`(`python -m quantpilot.engine.main`)·`scheduler`(`python -m quantpilot.scheduler.main`)·`web` 넷이다. VPS 배포는 `scripts/deploy.sh`와 `docs/07-operations.md`를 따른다. 환경변수는 `.env.example`을 복사해 쓴다.
 
 ## 설계 원칙 (코드에 박힌 것)
 
@@ -60,24 +66,27 @@ Docker(TimescaleDB·Redis 포함)는 `docker compose up -d` — 1단계에서 �
 
 ```
 quantpilot/
-  core/models.py        Target · Order · Fill · Position · JudgeResult · Gate
-  strategies/           base.py(Strategy·Context·ParamSpec) · vol_breakout · gem · gtaa · orb
-  backtest/             engine · costs(PRESETS) · metrics · attempts
-  execution/            broker(BrokerAdapter) · paper(PaperBroker) · risk(RiskManager)
-  judgment/             base(JudgeProvider·LLMProvider·decide) · stub
-  data/                 loader(upbit·yfinance·fdr·CandleCache) · synthetic
-  api/app.py            FastAPI 라우트
-  cli.py                qp backtest | fetch | judge | serve
-tests/                  23 tests
+  core/          모델 · 시계(MarketClock, 휴장표) · 이벤트 · 포트(Protocol)
+  strategies/    Strategy · vol_breakout · gem · gtaa · orb
+  backtest/      Backtester(TickRunner 재생) · 비용 모델 · 지표 · 시도 카운터
+  engine/        TickRunner · MarketEngine(실시간) · settings 우편함
+  execution/     PaperBroker · PersistentPaperBroker · OrderExecutor · RiskManager · Reconciler
+  judgment/      판단 모델 · LLM 리뷰어 · JudgmentPipeline · 보정 지표 · A/B
+  features/      FeatureBuilder (판단 입력 state)
+  data/          로더 · 업비트 WS · 캔들 집계 · 뉴스 수집 · 이벤트 캘린더
+  db/            SQLAlchemy 모델 · repo · alembic 마이그레이션
+  scheduler/     APScheduler 잡 · 부품 배선
+  api/ realtime/ REST v1 · WS 허브 · JWT
+  notify/ ops/   텔레그램 알림 · 배포 가드
+web/             Next.js 화면
+deploy/ scripts/ compose · 배포 · 백업 · G1 확인
 ```
 
-## 다음 (1단계 · 코인 페이퍼 4주)
+## 다음 (1단계 운영 → 관문 G2)
 
-- `data/upbit_ws.py` 업비트 웹소켓 체결가 → PaperBroker.on_price
-- `judgment/typesafe.py` Jev 어댑터 (`POST /v1/systemone`, jev-latest) · `judgment/anthropic.py` · `judgment/google.py`
-- `features/builder.py` state JSON (지표 등급화 · 뉴스 요약)
-- 원장 → TimescaleDB, 보정 지표(Brier·ECE) 리포트, 게이팅 ON/OFF A/B
-- 관문 G2: 4주 페이퍼에서 게이팅 ON의 MDD < OFF, Brier < 0.25
+1. VPS 준비 → `scripts/deploy.sh --dry-run` → 배포 → 첫 실행 체크리스트
+2. API 키 등록 후 `QP_JUDGE_PROVIDER=typesafe`로 게이팅 켜기, 네트워크 계약 테스트 실행
+3. 4주 페이퍼 운영 (게이팅 ON/OFF 섀도 동시 기록) → `qp report ab --weeks 4`로 G2 판정
 
 ## 고지
 

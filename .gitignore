@@ -18,3 +18,8 @@ dist/
 .moai/reports/**/*.md
 .claude/settings.local.json
 .claude/worktrees/
+.moai/reports/t*/
+.moai/evolution/telemetry/*.jsonl
+.moai/harness/usage-log.jsonl
+.moai/lessons-inbox.jsonl
+.claude/settings.local.json.lock

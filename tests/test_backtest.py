@@ -37,6 +37,7 @@ def test_synthetic_seed_is_stable_across_processes():
             [sys.executable, "-c", code],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=True,
             env={**os.environ, "PYTHONHASHSEED": seed},
         ).stdout

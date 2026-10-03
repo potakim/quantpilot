@@ -17,16 +17,19 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from quantpilot.core.clock import to_utc, upbit_trading_day
+import pandas as pd
+
+from quantpilot.core.clock import UPBIT_DAY_START, to_utc, upbit_trading_day
 from quantpilot.core.events import BarClosed, TradeEvent
 from quantpilot.core.models import Market
 from quantpilot.core.ports import Clock, EngineLink
 from quantpilot.data.aggregator import CandleAggregator
 from quantpilot.data.store import CandleStore
+from quantpilot.engine.daily import DailyRollup
 from quantpilot.engine.tick import TickRunner
 
 if TYPE_CHECKING:
@@ -36,6 +39,9 @@ if TYPE_CHECKING:
     from quantpilot.engine.orders import ManualOrderConsumer
 
 log = logging.getLogger(__name__)
+
+# 시작 시 받는 과거 일봉 수 — 변동성 돌파 warmup 25봉 + 이평 20일에 여유 (ADR 0025)
+DAILY_SEED_DAYS = 60
 
 
 class MarketEngine:
@@ -162,6 +168,7 @@ def build_upbit_paper(
     *,
     sessions: Sessions | None = None,
     hub: Hub | None = None,
+    daily_seed: Mapping[str, pd.DataFrame] | None = None,
 ) -> MarketEngine:
     """업비트 페이퍼 엔진 배선. 판단 파이프라인은 settings.judge_provider로 고른다 (stub이면 게이팅 OFF).
 
@@ -258,6 +265,8 @@ def build_upbit_paper(
         cost=cost,
         shadow=shadow,
         record_signal=recorder.signal if recorder is not None else None,
+        # 일봉 전략은 분봉을 거래일(09:00 KST) 일봉으로 묶어 평가한다 (ADR 0025)
+        daily=DailyRollup(UPBIT_DAY_START, daily_seed),
     )
     orders = None
     if hub is not None:
@@ -277,6 +286,24 @@ class _LogBus:
         log.debug("event", extra={"topic": topic, "event": type(event).__name__})
 
 
+def fetch_daily_seed(
+    symbols: Sequence[str], count: int = DAILY_SEED_DAYS
+) -> dict[str, pd.DataFrame]:
+    """시작 시 업비트 REST 일봉(오늘 진행 중인 봉 포함)을 받는다. 실패한 심볼은 빼고 로그만 남긴다.
+
+    시드가 없는 심볼은 준비 기간(warmup)이 차지 않아 그 전략이 진입하지 않는다 — 안전한 쪽으로 멈춘다.
+    """
+    from quantpilot.data.loader import upbit_candles
+
+    seed: dict[str, pd.DataFrame] = {}
+    for sym in symbols:
+        try:
+            seed[sym] = upbit_candles(sym, "1d", count=count)
+        except Exception as e:  # noqa: BLE001 — 네트워크·응답 오류는 그 심볼만 빼고 계속
+            log.error("daily seed failed", extra={"symbol": sym, "error": type(e).__name__})
+    return seed
+
+
 def main() -> None:
     """업비트 페이퍼 엔진 실행 (네트워크 필요)."""
     from quantpilot.config import settings
@@ -287,8 +314,14 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO)
     logging.getLogger().addHandler(CriticalLogHandler(from_settings(settings)))  # 청산 실패 등
-    engine = build_upbit_paper(sessions=make_sessions(settings.db_url), hub=make_hub(settings))
-    symbols = sorted({s for st in engine.runner.strategies for s in st.symbols})
+    from quantpilot.strategies import create
+
+    symbols = sorted({s for name in ("vol_breakout",) for s in create(name).symbols})
+    engine = build_upbit_paper(
+        sessions=make_sessions(settings.db_url),
+        hub=make_hub(settings),
+        daily_seed=fetch_daily_seed(symbols),
+    )
     stream = UpbitStream(symbols, on_trade=engine.on_trade)
 
     async def _run() -> None:

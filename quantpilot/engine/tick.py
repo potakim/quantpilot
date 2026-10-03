@@ -15,6 +15,10 @@
 반대 target을 내도 청산이 먼저다. 정렬은 안정적이라 같은 그룹 안에서는 등록 순·전략이 준 순서를 지킨다.
 on_time_exit·on_stop_check는 판단 모델을 거치지 않는다 (01 §3: 청산은 2·6·7만 탄다).
 
+일봉 모드(ADR 0025): `daily`(DailyRollup)를 주면 일봉·월간 전략에는 분봉 대신 거래일 일봉(마지막 행 = 진행 중인
+오늘 봉)을 넘기고, (전략, 심볼)마다 거래일당 진입 한 번·청산 한 번만 처리한다. 실시간 엔진 전용이며 백테스트는
+일봉을 직접 재생하므로 쓰지 않는다.
+
 섀도 원장(06 §6.2, ADR 0016): `shadow` executor를 주면 ON이 받은 전략 신호를 그대로 게이팅 없이(배수 1.0)
 섀도 계좌에도 낸다. 판단은 한 번만 부르고, 섀도는 자기 risk.check → submit·포지션·손절선을 따로 가진다.
 섀도의 체결·주문은 버스에 발행하지 않는다(화면·알림이 실제 페이퍼 원장과 섞이지 않게).
@@ -45,6 +49,7 @@ from quantpilot.core.ports import (
     OrderExecutor,
     RiskGate,
 )
+from quantpilot.engine.daily import DailyRollup
 from quantpilot.engine.history import BarHistory
 from quantpilot.strategies.base import Context, Strategy
 
@@ -97,6 +102,7 @@ class TickRunner:
         min_trade_frac: float = 0.002,
         shadow: OrderExecutor | None = None,
         record_signal: Callable[[SignalEvent], Awaitable[int]] | None = None,
+        daily: DailyRollup | None = None,
     ):
         if getattr(risk, "unrestricted", False) and not executor.is_paper:
             raise ValueError("규칙 미적용 리스크 게이트는 페이퍼 브로커와만 쓸 수 있다 (ADR 0010)")
@@ -123,6 +129,14 @@ class TickRunner:
         self._off = _Book(shadow, shadow=True) if shadow is not None else None
         self.shadow_signals = 0  # 섀도에 넘긴 전략 신호 수 = ON이 발행한 전략 신호 수
         self.warnings: list[str] = []  # 백테스트 결과에 실린다
+        # 실시간 분봉으로 일봉 전략을 돌릴 때만 (ADR 0025). 백테스트는 일봉을 직접 넣으므로 None
+        self.daily = daily
+        self._entered: dict[
+            tuple[str, str], pd.Timestamp
+        ] = {}  # (전략, 심볼) → 진입을 처리한 거래일
+        self._exited: dict[
+            tuple[str, str], pd.Timestamp
+        ] = {}  # (전략, 심볼) → 청산을 처리한 거래일
 
     # ---------- 이벤트 입구 ----------
     async def on_bar_closed(self, ev: BarClosed) -> None:
@@ -142,9 +156,12 @@ class TickRunner:
         # 1. 봉 반영
         for ev in evs:
             self.history.append(ev)
+            if self.daily is not None and ev.timeframe != "1d":
+                self.daily.add(ev)
             for b in self._books():
                 b.executor.mark(ev.symbol, ev.close, ev.ts)
         bars = self.history.view()
+        daily_bars = self.daily.view() if self.daily is not None else None
         equity = self.executor.equity()
         equities = {id(b): b.executor.equity() for b in self._books()}
         await self.bus.publish("tick", TickSnapshot(self.market, ts, equity))
@@ -153,15 +170,19 @@ class TickRunner:
         positions = dict(self.executor.positions())
         cands: list[_Candidate] = []
         for s in self.strategies:
-            if not self._ready(s, bars):
+            sbars = daily_bars if daily_bars is not None and self._daily_mode(s) else bars
+            if not self._ready(s, sbars):
                 continue
             if s.timeframe == "1M" and not self.clock.is_last_session_of_month(ts):
                 continue
             ctx = Context(
-                ts=pd.Timestamp(ts), bars=bars, positions=positions, equity=equity, params=s.params
+                ts=pd.Timestamp(ts), bars=sbars, positions=positions, equity=equity, params=s.params
             )
-            for t in s.on_bar(ctx) or []:
-                cands.append(_Candidate(s, t, ctx, self._increases(t, bars, positions, equity)))
+            got = [
+                _Candidate(s, t, ctx, self._increases(t, sbars, positions, equity))
+                for t in s.on_bar(ctx) or []
+            ]
+            cands += [c for c in got if not self._done_today(c, ts)] if self._daily_mode(s) else got
         if not cands:
             return
 
@@ -181,7 +202,10 @@ class TickRunner:
             t = c.target
             if t.symbol not in bars or self.history.last_ts(t.symbol) != pd.Timestamp(ts):
                 continue  # 이 봉에 데이터 없는 심볼
-            bar = bars[t.symbol].iloc[-1]
+            if self._daily_mode(c.strategy):
+                self._mark_done(c, ts)
+            # 체결 기준가는 전략이 본 봉(일봉 모드면 진행 중인 오늘 봉)의 범위 안에서 정한다
+            bar = c.ctx.bars[t.symbol].iloc[-1] if c.ctx is not None else bars[t.symbol].iloc[-1]
             ref = self._ref_price(t, bar, ts)
             await self._act(c, ref, ts, [(b, equities[id(b)]) for b in self._books()])
 
@@ -373,6 +397,24 @@ class TickRunner:
             log.debug(msg, extra={"symbol": t.symbol})
             self.warnings.append(msg)
         return float(np.clip(t.price, bar["low"], bar["high"]))
+
+    def _daily_mode(self, s: Strategy) -> bool:
+        """실시간 분봉으로 일봉·월간 전략을 돌리는 중인가 (ADR 0025)."""
+        return self.daily is not None and s.timeframe in ("1d", "1M")
+
+    def _done_today(self, c: _Candidate, ts: datetime) -> bool:
+        """일봉 전략은 거래일마다 심볼별로 진입 한 번, 청산(비중 축소) 한 번만 처리한다.
+
+        백테스트의 일봉 1개 = 실시간의 하루 동안 분봉 수백 개라서, 같은 일봉 규칙이 매분 다시 같은 target을
+        낸다. 진입은 처음 돌파한 분에 한 번(판단 모델도 한 번), 청산은 그 거래일에 처음 평가될 때 한 번이다.
+        """
+        key = (c.strategy.name, c.target.symbol)
+        seen = self._entered if c.grows else self._exited
+        return seen.get(key) == self.daily.day_of(ts)
+
+    def _mark_done(self, c: _Candidate, ts: datetime) -> None:
+        key = (c.strategy.name, c.target.symbol)
+        (self._entered if c.grows else self._exited)[key] = self.daily.day_of(ts)
 
     @staticmethod
     def _ready(s: Strategy, bars: Mapping[str, pd.DataFrame]) -> bool:

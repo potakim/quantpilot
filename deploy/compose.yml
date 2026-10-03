@@ -23,9 +23,11 @@ x-app: &app
     QP_DATA_DIR: /app/data
     QP_DATABASE_URL: postgresql+asyncpg://quantpilot:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 필요}@db:5432/quantpilot
     QP_REDIS_URL: redis://redis:6379/0
+    QP_EVENTS_FILE: /app/config/events.yaml
     TZ: UTC
   volumes:
     - appdata:/app/data
+    - ./events.yaml:/app/config/events.yaml:ro  # 이벤트 캘린더 (저장소에서 PR로 갱신)
   restart: unless-stopped
   logging: &logging
     driver: json-file

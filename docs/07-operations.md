@@ -14,7 +14,12 @@
 
 - Ubuntu 24.04, 2 vCPU / 4 GB / 40 GB SSD, **고정 IP**(업비트 허용 IP 등록). 리전은 서울(업비트·KIS 지연 최소).
 - Docker Compose. 이미지는 GitHub Actions에서 빌드해 GHCR로 push, VPS에서 `docker compose pull && up -d`.
-- 배포 순서: `api` → `scheduler` → `engine`. 엔진은 **포지션이 없는 시간대**(KST 09:05~15:15 사이는 KRX 보유 중일 수 있으니 피하고, 20:00~22:00 권장)에만 재시작. 배포 스크립트가 `positions` 비어 있는지 확인하고 아니면 `--force` 요구.
+- 배포 순서: `api` → `scheduler` → `engine`. 엔진 재시작 규칙(ADR 0029):
+  - 업비트는 재시작해도 포지션·손절선·오늘 처리 표시를 복원한다(ADR 0028). 그래서 열린 포지션이 있어도 알림만 남긴다.
+  - 업비트 시간 청산 앞뒤(매일 KST 08:55~09:05)에는 재시작하지 않는다.
+  - 권장 시각은 KST 09:10~10:00이다(청산 직후라 포지션이 가장 적다).
+  - KRX 장중(평일 09:05~15:15) 차단과 KRX·미국 포지션 차단은 그 시장 엔진이 생기는 2단계부터 적용한다.
+  - 막히면 `--force`가 필요하다.
 - 롤백: 이전 이미지 태그로 `up -d`. DB 마이그레이션은 항상 하위 호환(컬럼 추가만, 삭제는 2배포 뒤).
 - 구성 파일: `deploy/compose.yml`(프로젝트 `qp-paper`), `scripts/deploy.sh`, `scripts/backup.sh`. 결정 배경은 ADR 0019.
 
@@ -33,7 +38,7 @@ curl -s 127.0.0.1:8000/api/v1/health             # ok·paper=true·engine_alive 
 - `POSTGRES_PASSWORD`는 DB URL에 그대로 들어가므로 URL에 안전한 문자로 만든다(예: `openssl rand -hex 24`). `QP_JWT_SECRET`은 32바이트 이상.
 - compose가 `QP_PAPER=true`를 못박는다. env 파일 값으로 실전으로 바뀌지 않는다.
 - db·redis는 호스트 포트가 없고 api는 `127.0.0.1:8000`에만 열린다. 밖에서 볼 때는 `ssh -L 8000:127.0.0.1:8000 vps` 또는 HTTPS 앞단(후속 카드).
-- 업데이트: `app/scripts/deploy.sh --tag <커밋 sha>`(기본 `latest`). engine 재시작 전 가드가 열린 포지션·KRX 장중(평일 KST 09:05~15:15)을 확인하고, 걸리면 api·scheduler까지만 갱신한 뒤 멈춘다. 그래도 진행하려면 `--force`.
+- 업데이트: `app/scripts/deploy.sh --tag <커밋 sha>`(기본 `latest`). engine 재시작 전 가드가 위 규칙(ADR 0029)을 확인하고, 걸리면 api·scheduler까지만 갱신한 뒤 멈춘다. 그래도 진행하려면 `--force`. `--dry-run`도 docker가 있으면 `compose config`로 설정을 실제로 검사한다.
 - 이미지를 VPS에서 직접 만들 때는 `--build`.
 - 화면(web, P1-13)까지 띄우려면 `--web`. web은 `127.0.0.1:3000`에 열리고, 브라우저 WS는 `QP_WS_URL`(기본 `ws://127.0.0.1:8000/api/v1/ws`)로 api에 직접 붙으므로 SSH 터널은 두 포트 모두 연다: `ssh -L 3000:127.0.0.1:3000 -L 8000:127.0.0.1:8000 vps`. HTTPS 앞단을 둔 뒤에는 env 파일에 `QP_WS_URL=wss://<도메인>/api/v1/ws`.
 

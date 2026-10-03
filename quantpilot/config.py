@@ -10,8 +10,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # data/keys.env는 POST /settings/keys가 쓰는 파일 — 재시작 뒤 환경변수처럼 읽힌다 (ADR 0017 §4)
+    # 빈 환경변수(.env의 `QP_X=` 줄)는 "설정 안 함"으로 본다 — 화면에서 등록한 키를 덮지 않게 (ADR 0029)
     model_config = SettingsConfigDict(
-        env_file=(".env", "data/keys.env"), env_prefix="QP_", extra="ignore"
+        env_file=(".env", "data/keys.env"),
+        env_prefix="QP_",
+        extra="ignore",
+        env_ignore_empty=True,
     )
 
     env: str = "dev"

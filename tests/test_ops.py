@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from quantpilot.core.models import Market
 from quantpilot.ops.deploy_guard import evaluate, in_blackout
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -131,12 +132,20 @@ def test_blackout_window():
 
 
 def test_evaluate_blocks_on_positions_and_hours():
+    """ADR 0029: 복원되는 업비트 포지션은 알림, 그 밖의 시장 포지션은 막음, 위험 시간대는 실시간 엔진 시장만."""
     evening = _utc(2026, 9, 30, 11, 30)  # KST 20:30
     assert evaluate(evening, {"upbit": 0, "krx": 0, "us": 0}).ok
     held = evaluate(evening, {"upbit": 2, "krx": 0, "us": 0})
-    assert not held.ok and "upbit=2" in held.reasons[0]
-    noon = evaluate(_utc(2026, 9, 30, 3, 0), {"upbit": 0})
-    assert not noon.ok and "KRX" in noon.reasons[0]
+    assert held.ok and any("upbit=2" in n for n in held.notes)  # 재시작 뒤 복원 (ADR 0028)
+    krx_held = evaluate(evening, {"upbit": 0, "krx": 1})
+    assert not krx_held.ok and "krx=1" in krx_held.reasons[0]
+    noon = _utc(2026, 9, 30, 3, 0)  # KST 12:00 평일
+    assert evaluate(noon, {"upbit": 0}).ok  # KRX 엔진이 없으면 장중 차단 없음
+    with_krx = evaluate(noon, {"upbit": 0}, live=frozenset({Market.UPBIT, Market.KRX}))
+    assert not with_krx.ok and "KRX" in with_krx.reasons[0]
+    exit_window = evaluate(_utc(2026, 10, 3, 0, 0), {"upbit": 0})  # 토요일 KST 09:00
+    assert not exit_window.ok and "시간 청산" in exit_window.reasons[0]
+    assert evaluate(_utc(2026, 10, 3, 0, 5), {"upbit": 0}).ok  # 09:05부터 허용
     assert evaluate(_utc(2026, 9, 30, 16, 0), {}).notes  # 권장 시각 밖 안내
 
 

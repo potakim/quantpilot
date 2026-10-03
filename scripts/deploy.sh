@@ -60,6 +60,17 @@ step() {
   echo "==> $*"
 }
 
+# dry-run도 compose 설정(필수 변수·파일 경로)은 실제로 검사한다 (ADR 0029). docker가 없으면 건너뛴다
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  step "compose 설정 검사"
+  if command -v docker >/dev/null 2>&1; then
+    "${COMPOSE[@]}" config -q
+    echo "compose 설정 OK"
+  else
+    echo "docker 없음 — 설정 검사 생략"
+  fi
+fi
+
 step "이미지 준비 (tag=$TAG)"
 if [[ "$BUILD" -eq 1 ]]; then
   run "${COMPOSE[@]}" build

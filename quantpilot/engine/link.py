@@ -129,3 +129,24 @@ class SettingsEngineLink:
         """저장된 거래일별 규칙 평가 기록 {day: {strategy: {evaluated, signaled}}}. 없으면 빈 dict."""
         raw = await self.config.get_setting(self._rules_key(market))
         return dict((raw or {}).get("days") or {})
+
+    @staticmethod
+    def _done_key(market: Market) -> str:
+        return f"engine.done.{Market(market).value}"
+
+    async def set_done(self, market: Market, done: dict[str, Any]) -> None:
+        """오늘 거래일의 진입·청산 처리 표시를 쓴다 (ADR 0028)."""
+        await self.config.set_setting(self._done_key(market), done)
+
+    async def done(self, market: Market) -> dict[str, Any] | None:
+        """마지막으로 쓴 처리 표시 {day, entered, exited}. 없으면 None."""
+        return await self.config.get_setting(self._done_key(market))
+
+    async def month_start(self, market: Market) -> dict[str, Any] | None:
+        """scheduler month_roll이 저장한 월초 평가액 {month: "YYYY-MM", equity}. 없으면 None."""
+        return await self.config.get_setting(month_start_key(market))
+
+
+def month_start_key(market: Market) -> str:
+    """settings에 월초 평가액을 두는 키 (scheduler month_roll이 쓰고 엔진·API가 읽는다)."""
+    return f"month_start_equity.{Market(market).value}"

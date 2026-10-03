@@ -96,11 +96,13 @@ class PaperBroker(BrokerAdapter):
             pos.avg_price = (pos.avg_price * pos.qty + px * order.qty) / nq
             pos.qty = nq
             pos.opened_at = pos.opened_at or (ts or datetime.now(UTC))
+            if order.stop is not None:
+                pos.stop = order.stop  # 재시작 뒤에도 손절선을 되살린다 (ADR 0028)
         else:
             self._cash += gross - fee - tax
             pos.qty -= order.qty
             if not pos.is_open:
-                pos.qty, pos.avg_price, pos.opened_at = 0.0, 0.0, None
+                pos.qty, pos.avg_price, pos.opened_at, pos.stop = 0.0, 0.0, None, None
         order.status = OrderStatus.FILLED
         f = Fill(
             order.id,

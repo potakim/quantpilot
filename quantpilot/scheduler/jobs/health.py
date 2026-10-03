@@ -6,6 +6,7 @@ import logging
 
 from quantpilot.core.clock import to_local
 from quantpilot.core.models import Market
+from quantpilot.engine.link import month_start_key as link_month_start_key
 from quantpilot.scheduler.context import JobContext
 from quantpilot.scheduler.jobs.exits import TIME_EXIT_STRATEGIES, engine_alive, run_backup_exit
 
@@ -58,8 +59,8 @@ async def equity_snapshot(ctx: JobContext) -> None:
 
 
 def month_start_key(market: Market) -> str:
-    """settings에 월초 평가액을 두는 키."""
-    return f"month_start_equity.{Market(market).value}"
+    """settings에 월초 평가액을 두는 키 (엔진 우편함과 같은 정의, ADR 0028)."""
+    return link_month_start_key(market)
 
 
 async def month_roll(ctx: JobContext) -> None:

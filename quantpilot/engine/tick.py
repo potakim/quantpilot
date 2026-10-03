@@ -34,6 +34,7 @@ import math
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -141,6 +142,7 @@ class TickRunner:
         # 규칙 미충족 집계 (ADR 0027): 거래일 → 전략 → {evaluated: 평가한 종목, signaled: 진입 target 낸 종목}
         self.rule_days: dict[str, dict[str, dict[str, set[str]]]] = {}
         self.rule_dirty = False  # MarketEngine이 우편함에 쓴 뒤 False로 돌린다
+        self.done_dirty = False  # 처리 표시가 바뀌었다 → 우편함에 쓴다 (ADR 0028)
 
     # ---------- 이벤트 입구 ----------
     async def on_bar_closed(self, ev: BarClosed) -> None:
@@ -220,9 +222,9 @@ class TickRunner:
                 )
             if self._daily_mode(c.strategy):
                 self._mark_done(c, ts)
-            # 체결 기준가는 전략이 본 봉(일봉 모드면 진행 중인 오늘 봉)의 범위 안에서 정한다
-            bar = c.ctx.bars[t.symbol].iloc[-1] if c.ctx is not None else bars[t.symbol].iloc[-1]
-            ref = self._ref_price(t, bar, ts)
+            # 체결 기준가는 지금 들어온 봉의 범위 안에서 정한다. 일봉 모드도 오늘 일봉이 아니라 이 분봉이다 —
+            # 돌파한 그 분이면 목표가에, 이미 지난 가격(늦은 시작·할트 해제·늦은 첫 분봉)이면 현재가 쪽에 붙는다 (ADR 0028)
+            ref = self._ref_price(t, bars[t.symbol].iloc[-1], ts)
             books = [
                 (b, self._sizing_equity(b, c, equities, prev_marks, entry_equity))
                 for b in self._books()
@@ -469,6 +471,45 @@ class TickRunner:
     def _mark_done(self, c: _Candidate, ts: datetime) -> None:
         key = (c.strategy.name, c.target.symbol)
         (self._entered if c.grows else self._exited)[key] = self.daily.day_of(ts)
+        self.done_dirty = True
+
+    def done_today(self, now: datetime) -> dict[str, Any]:
+        """오늘 거래일의 처리 표시 — 우편함에 저장해 재시작 뒤 되살린다 (ADR 0028)."""
+        day = self.daily.day_of(now)
+
+        def pick(seen: dict[tuple[str, str], pd.Timestamp]) -> list[list[str]]:
+            return sorted([s, sym] for (s, sym), d in seen.items() if d == day)
+
+        return {
+            "day": day.date().isoformat(),
+            "entered": pick(self._entered),
+            "exited": pick(self._exited),
+        }
+
+    def restore_state(self, now: datetime, done: Mapping[str, Any] | None = None) -> None:
+        """재시작 직후: 손절선과 오늘 처리 표시를 되살린다 (ADR 0028).
+
+        손절선은 브로커가 저장한 포지션의 stop에서 온다. 처리 표시는 우편함 기록(done)을 쓰고, 그에 더해
+        오늘 거래일에 연 포지션은 진입·청산 모두 처리된 것으로 본다 — 기록 직전에 죽었을 때를 막는다.
+        어제 이전에 연 포지션은 표시하지 않는다(그날 첫 평가에서 시간 청산해야 한다).
+        """
+        for b in self._books():
+            for sym, p in b.executor.positions().items():
+                if p.is_open and p.stop is not None:
+                    b.stops[sym] = p.stop
+        if self.daily is None:
+            return
+        day = self.daily.day_of(now)
+        if done and done.get("day") == day.date().isoformat():
+            for s, sym in done.get("entered", []):
+                self._entered[(s, sym)] = day
+            for s, sym in done.get("exited", []):
+                self._exited[(s, sym)] = day
+        for b in self._books():
+            for sym, p in b.executor.positions().items():
+                if p.is_open and p.opened_at is not None and self.daily.day_of(p.opened_at) == day:
+                    self._entered[(p.strategy, sym)] = day
+                    self._exited[(p.strategy, sym)] = day
 
     @staticmethod
     def _ready(s: Strategy, bars: Mapping[str, pd.DataFrame]) -> bool:

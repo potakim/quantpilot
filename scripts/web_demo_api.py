@@ -382,6 +382,7 @@ async def seed(sessions: Any, hub: Any, *, halt: bool) -> dict[str, float]:
         except KeyError:
             eq = float(acct.cash())
         await config.set_setting(month_start_key(m), {"month": month, "equity": eq / (1 + pnl)})
+        await _seed_snapshots(sessions, m, eq, float(acct.cash()))
 
     events = SqlRiskEventRepo(sessions)
     ev = await events.add("judge_down", {"market": "upbit", "note": "demo"})
@@ -392,6 +393,20 @@ async def seed(sessions: Any, hub: Any, *, halt: bool) -> dict[str, float]:
         await events.add("reconcile_mismatch", {"market": "upbit", "note": "demo"})
     log.info("demo data seeded", extra={"symbols": sorted(COINS), "judgments": len(specs)})
     return last
+
+
+async def _seed_snapshots(sessions: Any, market: Market, equity: float, cash: float) -> None:
+    """최근 35일 1시간 간격 평가액 스냅샷 (자산 곡선·오늘 손익 표시용). 지금 평가액에서 거꾸로 걷는다."""
+    from quantpilot.db.repo import SqlOpsRepo
+
+    ops = SqlOpsRepo(sessions)
+    rng = random.Random(seed_of(market.value))
+    now = MarketClock(market).now().replace(minute=0, second=0, microsecond=0)
+    value = equity
+    for h in range(35 * 24):
+        ts = now - timedelta(hours=h)
+        await ops.add_equity_snapshot(market=market, ts=ts, cash=cash, equity=round(value, 2))
+        value /= 1 + rng.gauss(0.00004, 0.0025)
 
 
 async def pulse(sessions: Any, hub: Any, last: dict[str, float], *, engine_alive: bool) -> None:

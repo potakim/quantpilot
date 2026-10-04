@@ -122,4 +122,5 @@ FastAPI, base `/api/v1`. 인증은 `Authorization: Bearer <JWT>` (단일 사용�
 | 전략 설정 | `/strategies`, PATCH, `/strategies/{name}/reset-params`, `/portfolio`(총 자본·시장 계좌), `/settings`(리스크 규칙·`judge`), PATCH `/settings`, `/costs/ai`, 백테스트 보기 → `/backtests?strategy=` |
 | AI 판단 로그 | `/judgments`, `/judgments/{id}`, `/judgments/calibration`, `/judgments/ab`, POST `/ask` |
 | 백테스트 | POST `/backtests`, GET `/backtests/{id}`, WS `backtest:{id}` |
+| 포트폴리오 | `/portfolio`(시장 계좌·월 손익·할트), `/portfolio/equity?market=`(시장별 자산 곡선), `/positions`(현재가·미실현), `/strategies`(배분), `/health`(`live_markets`), WS `portfolio`·`fills`(받으면 다시 불러온다) |
 | 설정 | `/settings`, 키 등록(POST `/settings/keys`, 값은 저장만 하고 절대 반환하지 않음) |

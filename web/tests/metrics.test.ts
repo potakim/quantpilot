@@ -5,6 +5,7 @@ import {
   curvePaths,
   feeRowText,
   scheduleRows,
+  shortWhat,
   strategyMddText,
   strategyMonthText,
   todayPnlView,
@@ -129,5 +130,48 @@ describe("자산 곡선 좌표", () => {
     )!;
     expect(p.bench).toBeNull();
     expect(p.main).toBe("0.0,25.0 100.0,25.0");
+    expect(p.benchEnd).toBeNull();
+    expect(p.benchRet).toBeNull();
+  });
+  it("끝점·기간 수익률·날짜 눈금(KST M/D, 같은 날은 하나)", () => {
+    const pts = [
+      { ts: "2026-09-04T00:00:00Z", v: 100 },
+      { ts: "2026-09-19T00:00:00Z", v: 90 },
+      { ts: "2026-10-04T00:00:00Z", v: 110 },
+    ];
+    const bench = [
+      { ts: "2026-09-04T00:00:00Z", v: 100 },
+      { ts: "2026-10-04T00:00:00Z", v: 104 },
+    ];
+    const p = curvePaths(pts, bench, 600, 200)!;
+    expect(p.end).toEqual({ x: 600, y: 0 });
+    expect(p.ret).toBeCloseTo(0.1);
+    expect(p.benchRet).toBeCloseTo(0.04);
+    expect(p.benchEnd!.x).toBe(600);
+    expect(p.xTicks.map((t) => t.label)).toEqual(["9/4", "9/14", "9/24", "10/4"]);
+    expect(p.xTicks.map((t) => t.x)).toEqual([0, 200, 400, 600]);
+    const day = curvePaths(
+      [
+        { ts: "2026-10-04T00:00:00Z", v: 1 },
+        { ts: "2026-10-04T03:00:00Z", v: 1 },
+      ],
+      null,
+      600,
+      200,
+    )!;
+    expect(day.xTicks.map((t) => t.label)).toEqual(["10/4"]);
+  });
+});
+
+describe("일정 문구 줄이기", () => {
+  it("여러 건이면 앞 1건 + 외 n건, KRW- 접두어는 뗀다", () => {
+    const what = ["KRW-BTC", "KRW-ETH", "KRW-SOL"].map((s) => `${s} 목표가 ₩1 돌파 시 진입`).join(" · ");
+    expect(shortWhat(what)).toEqual({
+      text: "BTC 목표가 ₩1 돌파 시 진입 외 2건",
+      full: "BTC 목표가 ₩1 돌파 시 진입 · ETH 목표가 ₩1 돌파 시 진입 · SOL 목표가 ₩1 돌파 시 진입",
+    });
+  });
+  it("두 건까지는 그대로", () => {
+    expect(shortWhat("변동성 돌파 보유분 청산 · 목표가 재계산").text).toBe("변동성 돌파 보유분 청산 · 목표가 재계산");
   });
 });

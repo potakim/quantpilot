@@ -13,10 +13,11 @@ import { KpiCard } from "@/components/ui/KpiCard";
 import { Toggle } from "@/components/ui/Toggle";
 import { Badge, Card, CardSkeleton, EmptyNote, ErrorNote, cx } from "@/components/ui/primitives";
 import { apiFetch, reasonText } from "@/lib/api";
-import { DASH, fmtKrw, fmtNumber, fmtQty, fmtUsd, kstDayStartIso, kstTime, shortSymbol, toneOf } from "@/lib/format";
+import { DASH, fmtKrw, fmtNumber, fmtPct, fmtQty, fmtUsd, kstDayStartIso, kstTime, shortSymbol, toneOf } from "@/lib/format";
 import { STRATEGY_TITLE, marketLabel, scheduleSource, strategyLabel } from "@/lib/labels";
-import { cashKrw, scheduleRows, strategyMddText, strategyMonthText, todayPnlView } from "@/lib/metrics";
+import { cashKrw, curvePaths, scheduleRows, shortWhat, strategyMddText, strategyMonthText, todayPnlView } from "@/lib/metrics";
 import {
+  useEquityCurve,
   useFills,
   useGates,
   useHealth,
@@ -25,6 +26,7 @@ import {
   useSchedule,
   useStrategies,
 } from "@/lib/queries";
+import { PAPER_ONLY } from "@/lib/strategy";
 import type { JudgmentRow, StrategyView } from "@/lib/types";
 import { useUi } from "@/lib/ui-store";
 import { useLive } from "@/lib/ws";
@@ -144,11 +146,14 @@ function ScheduleCard() {
   return (
     <Card className="flex flex-col gap-3.5 p-5">
       <h2 className="text-[15px] font-semibold">오늘 일정 (KST)</h2>
-      {items.length ? (
+      {schedule.isLoading && !items.length ? (
+        <CardSkeleton lines={4} className="border-0 p-0" />
+      ) : items.length ? (
         <ol className="flex flex-col gap-3">
           {items.map((s, i) => {
             const done = s.done;
             const next = !done && items.findIndex((x) => !x.done) === i;
+            const what = shortWhat(s.what);
             return (
               <li key={s.key} className="flex items-start gap-3">
                 <span className={cx("num w-12 text-[13px]", next ? "font-semibold text-ink" : "text-muted")}>
@@ -162,7 +167,9 @@ function ScheduleCard() {
                   )}
                 />
                 <div className="flex flex-col gap-0.5">
-                  <div className="text-[13px] font-medium">{s.what}</div>
+                  <div className="text-[13px] font-medium" title={what.text === what.full ? undefined : what.full}>
+                    {what.text}
+                  </div>
                   <div className="text-xs text-muted">
                     {scheduleSource(s.name, s.market)} · {done ? "완료" : next ? "다음" : "예정"}
                   </div>
@@ -186,6 +193,7 @@ function StrategyTable() {
   const market = useUi((s) => s.market);
   const toggle = useToggleStrategy();
   const live = useLive((s) => s.strategyStatus);
+  // "페이퍼만": 실전 전환이 잠긴 전략(ORB, 원본 아트보드) + 실전 모드인데 아직 페이퍼로 도는 전략
   const paper = health.data?.paper ?? true;
   const rows = (strategies.data ?? []).filter((s) => market === "all" || s.market === market);
   return (
@@ -229,7 +237,7 @@ function StrategyTable() {
                   <th scope="row" className="text-left font-semibold">
                     <span className="inline-flex flex-wrap items-center gap-2">
                       {STRATEGY_TITLE[s.name] ?? s.name}
-                      {s.paper && !paper ? <Badge tone="warn">페이퍼만</Badge> : null}
+                      {PAPER_ONLY[s.name] || (s.paper && !paper) ? <Badge tone="warn">페이퍼만</Badge> : null}
                     </span>
                   </th>
                   <td className="text-muted">
@@ -289,6 +297,31 @@ function RecentJudgments({ count = 3 }: { count?: number }) {
   );
 }
 
+/** 모바일 총 자산 카드의 스파크라인 (Mobile.dc.html). 자산 곡선은 업비트 계좌뿐이라 그 사실을 같이 적는다. */
+function Sparkline() {
+  const curve = useEquityCurve("upbit", 30);
+  const p = curvePaths(curve.data?.points ?? [], null, 300, 40);
+  if (!p) return null;
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex justify-between text-[11px] text-muted">
+        <span>업비트 30일</span>
+        <span className="num">{fmtPct(p.ret, { digits: 1 })}</span>
+      </div>
+      <svg viewBox="0 -3 300 46" preserveAspectRatio="none" aria-hidden="true" className="h-9 w-full">
+        <polyline
+          points={p.main}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.5}
+          vectorEffect="non-scaling-stroke"
+          className="text-muted2"
+        />
+      </svg>
+    </div>
+  );
+}
+
 function MobileDashboard() {
   const portfolio = usePortfolio();
   const strategies = useStrategies();
@@ -296,7 +329,11 @@ function MobileDashboard() {
   const judgments = useJudgments({ limit: 5 });
   const { gauge } = useMonthLoss();
   const p = portfolio.data;
-  const active = useMemo(() => strategies.data ?? [], [strategies.data]);
+  const pnl = todayPnlView(p);
+  // 원본처럼 켜진 전략만. 꺼진 전략은 개수만 알려 주고 전략 설정에서 켠다
+  const all = useMemo(() => strategies.data ?? [], [strategies.data]);
+  const active = all.filter((s) => s.enabled);
+  const off = all.length - active.length;
   return (
     <div className="flex flex-col gap-3 px-5 pb-4 pt-1 md:hidden">
       <HaltBanner />
@@ -306,10 +343,14 @@ function MobileDashboard() {
         <Card className="flex flex-col gap-2.5 rounded-[16px] p-[18px]">
           <div className="text-xs text-muted">총 자산</div>
           <div className="num text-[28px] font-bold">{p ? fmtKrw(p.total_equity_krw) : DASH}</div>
-          <div className="flex gap-3.5 text-xs">
-            <span className="text-muted">{p ? `현금 ${fmtKrw(cashKrw(p))}` : DASH}</span>
+          <div className="flex flex-wrap gap-x-3.5 gap-y-1 text-xs">
+            <span className={TONE_TEXT[pnl.tone]}>
+              오늘 {pnl.value}
+              {pnl.pct === DASH ? "" : ` (${pnl.pct})`}
+            </span>
             <span className="text-muted">이번 달 {gauge.value}</span>
           </div>
+          <Sparkline />
           <div className="flex flex-col gap-1.5">
             <div className="flex justify-between text-[11px] text-muted">
               <span>월 손실 {gauge.limit}</span>
@@ -348,6 +389,23 @@ function MobileDashboard() {
           ))}
         </ul>
         {strategies.isLoading ? <CardSkeleton lines={3} className="border-0" /> : null}
+        {strategies.isError ? (
+          <div className="p-3.5">
+            <ErrorNote>전략 목록을 불러오지 못했습니다: {reasonText(strategies.error)}</ErrorNote>
+          </div>
+        ) : null}
+        {!strategies.isLoading && !strategies.isError && !active.length ? (
+          <p className="px-3.5 py-3 text-xs text-muted">켜진 전략이 없습니다.</p>
+        ) : null}
+        {off > 0 ? (
+          <p className={cx("px-3.5 py-2.5 text-[11px] text-muted", active.length > 0 && "border-t border-bg3")}>
+            꺼진 전략 {off}개는{" "}
+            <Link href="/strategies" className="text-[11px]">
+              전략 설정
+            </Link>
+            에서 켤 수 있습니다
+          </p>
+        ) : null}
       </Card>
       <div className="flex items-center justify-between">
         <h2 className="flex items-center gap-1.5 text-sm font-semibold">
@@ -362,6 +420,7 @@ function MobileDashboard() {
         {(judgments.data?.items ?? []).slice(0, 2).map((j) => (
           <JudgmentCard key={j.id} j={j} compact />
         ))}
+        {judgments.isLoading ? <CardSkeleton lines={2} /> : null}
         {!judgments.isLoading && !(judgments.data?.items ?? []).length ? <EmptyNote>기록된 판단이 없습니다</EmptyNote> : null}
       </div>
     </div>

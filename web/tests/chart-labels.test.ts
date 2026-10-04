@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { applyTick, axisPrice, movingAverage, TF_SECONDS, toBars } from "@/lib/chart-data";
-import { answerRows, gateLabel, judgmentResult, scheduleSource, verdictLabel } from "@/lib/labels";
+import {
+  answerRows,
+  gateLabel,
+  gateZone,
+  judgmentResult,
+  modelName,
+  orderStatusLabel,
+  scheduleSource,
+  strategyLabel,
+  verdictLabel,
+} from "@/lib/labels";
 
 describe("일정 출처 문구 (ADR 0031)", () => {
   it("전략이면 전략 이름, 잡이면 시장 이름, 시장 없으면 공통 — 잡 ID를 내지 않는다", () => {
@@ -96,5 +106,38 @@ describe("판단 라벨", () => {
   });
   it("리스크 질문이 0.5 이상이면 주황", () => {
     expect(answerRows({ news_risk: 0.63 })[0]!.tone).toBe("warn");
+  });
+  it("판단 상세의 게이트는 영어 대신 구간 이름", () => {
+    expect([gateZone("full"), gateZone("half"), gateZone("hold"), gateZone(null)]).toEqual([
+      "전체 구간",
+      "절반 구간",
+      "보류 구간",
+      "—",
+    ]);
+  });
+});
+
+describe("한글 표시 이름", () => {
+  it("LLM 모델 id → 아트보드 이름, 모르는 id는 단어 첫 글자만 대문자", () => {
+    expect(modelName("claude-sonnet-5")).toBe("Claude Sonnet 5");
+    expect(modelName("gemini-3.5-flash")).toBe("Gemini 3.5 Flash");
+    expect(modelName("gemini-3.5-flash-lite")).toBe("Gemini 3.5 Flash Lite");
+    expect(modelName("claude-stub")).toBe("Claude 스텁");
+    expect(modelName("claude-opus-6")).toBe("Claude Opus 6");
+    expect(modelName(null)).toBe("—");
+  });
+  it("주문 상태", () => {
+    expect(["queued", "pending", "partial", "filled", "rejected", "cancelled"].map(orderStatusLabel)).toEqual([
+      "접수 대기",
+      "대기",
+      "일부 체결",
+      "체결",
+      "거부",
+      "취소",
+    ]);
+    expect(orderStatusLabel("weird")).toBe("weird");
+  });
+  it("수동 주문의 전략 이름", () => {
+    expect(strategyLabel("manual")).toBe("수동");
   });
 });

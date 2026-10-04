@@ -14,6 +14,7 @@ export const STRATEGY_LABEL: Record<string, string> = {
   gem: "듀얼 모멘텀 GEM",
   gtaa: "10개월선 GTAA",
   orb: "5분 ORB",
+  manual: "수동", // 화면에서 넣은 주문 (API 기본 strategy="manual")
 };
 
 export const STRATEGY_TITLE: Record<string, string> = {
@@ -46,6 +47,43 @@ export function judgmentResult(gate: string | null | undefined): { text: string;
   if (gate === "half") return { text: "진입 50%", tone: "ok" };
   if (gate === "hold") return { text: "보류", tone: "warn" };
   return { text: gate ?? "—", tone: "muted" };
+}
+
+/** 판단 상세의 게이트 구간 (confidence가 떨어진 칸). 임계값은 그때그때 바뀔 수 있어 숫자 대신 이름으로. */
+export function gateZone(gate: string | null | undefined): string {
+  if (gate === "full") return "전체 구간";
+  if (gate === "half") return "절반 구간";
+  if (gate === "hold") return "보류 구간";
+  return gate ?? "—";
+}
+
+// 주문 상태 (core.models.OrderStatus + API 주문 큐의 queued, ADR 0017)
+const ORDER_STATUS: Record<string, string> = {
+  queued: "접수 대기",
+  pending: "대기",
+  partial: "일부 체결",
+  filled: "체결",
+  rejected: "거부",
+  cancelled: "취소",
+};
+
+export const orderStatusLabel = (status: string | null | undefined) => (status ? (ORDER_STATUS[status] ?? status) : "—");
+
+// LLM 모델 표시 이름 (아트보드 문구). 모르는 id는 단어 첫 글자만 대문자로 바꾼다.
+const MODEL_NAME: Record<string, string> = {
+  "claude-sonnet-5": "Claude Sonnet 5",
+  "gemini-3.5-flash": "Gemini 3.5 Flash",
+  "gemini-3.5-flash-lite": "Gemini 3.5 Flash Lite",
+};
+
+export function modelName(id: string | null | undefined): string {
+  if (!id) return "—";
+  if (MODEL_NAME[id]) return MODEL_NAME[id];
+  return id
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((w) => (w === "stub" ? "스텁" : /^\d/.test(w) ? w : w[0]!.toUpperCase() + w.slice(1)))
+    .join(" ");
 }
 
 /** LLM 판정 배지. 모델 id에서 표시 이름을 뽑는다. */

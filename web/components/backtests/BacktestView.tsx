@@ -146,7 +146,7 @@ export function BacktestView({ initialStrategy, initialId }: { initialStrategy?:
               <CardSkeleton lines={4} className="border-0 p-0" />
             ) : (
               <EmptyNote>
-                이 전략의 실행 기록이 없습니다. 왼쪽에서 데이터·기간을 고르고 ‘백테스트 실행’을 누르세요.
+                이 전략의 실행 기록이 없습니다. 설정에서 데이터·기간을 고르고 ‘백테스트 실행’을 누르세요.
               </EmptyNote>
             )}
           </Card>

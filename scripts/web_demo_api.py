@@ -55,21 +55,25 @@ COINS = {  # 심볼 → 합성 시작가 (원)
 MINUTES = 2 * 24 * 60  # 1분봉 이틀치
 
 
-async def memory_sessions() -> tuple[Any, Any]:
-    """SQLite 인메모리 세션 (tests/api_helpers.py와 같은 구성)."""
+async def demo_sessions(db_path: Path) -> tuple[Any, Any]:
+    """임시 폴더의 SQLite 파일 세션 — 운영처럼 작업마다 연결이 따로다.
+
+    인메모리 DB(StaticPool)는 연결 하나를 같이 써서, 1초마다 도는 pulse와 백테스트 결과 저장이 겹치면
+    "SQL statements in progress"로 커밋이 깨지고 결과가 사라졌다 (t36에서 확인).
+    """
     from sqlalchemy import event
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-    from sqlalchemy.pool import StaticPool
 
     from quantpilot.db.models import Base
 
     engine = create_async_engine(
-        "sqlite+aiosqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False}
+        f"sqlite+aiosqlite:///{db_path.as_posix()}", connect_args={"timeout": 30}
     )
 
     @event.listens_for(engine.sync_engine, "connect")
     def _fk_on(dbapi_conn: Any, _: Any) -> None:
         dbapi_conn.execute("pragma foreign_keys=on")
+        dbapi_conn.execute("pragma journal_mode=wal")
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -458,7 +462,7 @@ async def main(argv: list[str] | None = None) -> None:
         admin_password=admin_password,
         jwt_secret=jwt_secret,
     )
-    engine, sessions = await memory_sessions()
+    engine, sessions = await demo_sessions(tmp / "demo.db")
     hub = MemoryHub()
     last = await seed(sessions, hub, halt=a.halt)
     app = create_app(

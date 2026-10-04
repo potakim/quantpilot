@@ -60,6 +60,9 @@ export interface ParamSpecView {
 
 /** G1 검증 근거 (ops/g1.py, `qp gate g1 --write`). 지표 키는 전략마다 다르다 (cagr·mdd·mdd_monthly…) */
 export interface G1Evidence {
+  /** 파라미터 시도 횟수 (AttemptTracker, 7회 넘으면 과최적화 경고) */
+  distinct_attempts?: number;
+  within_20pct?: boolean | null;
   basis?: string;
   period?: string;
   metrics?: Record<string, number>;
@@ -76,6 +79,8 @@ export interface StrategyView {
   symbols: string[];
   params: Record<string, unknown>;
   schema?: ParamSpecView[];
+  /** 그 시장의 비용 모델 — 백테스터·PaperBroker와 같은 값 (ADR 0033) */
+  cost_model?: CostModelView;
   enabled: boolean;
   allocation: number;
   paper: boolean;
@@ -232,6 +237,90 @@ export interface RiskRulesView {
   max_orders_per_symbol_per_sec: number;
   max_consecutive_api_errors: number;
   locked: true;
+}
+
+/** backtest/costs.py CostModel (편도 비율) */
+export interface CostModelView {
+  fee_rate: number;
+  slippage_rate: number;
+  sell_tax_rate: number;
+  tick_size?: number;
+}
+
+export interface EquityPt {
+  ts: string;
+  v: number;
+}
+
+/** GET /backtests/{id}의 구간별 성과 한 행 (ADR 0033) */
+export interface BacktestPeriod {
+  key: string;
+  label: string;
+  start: string;
+  end: string;
+  cagr: number;
+  bench_cagr: number | null;
+  mdd: number;
+  bench_mdd: number | null;
+  excess: number | null;
+}
+
+/** GET /backtests/{id}. status가 done이 아니면 곡선·벤치마크가 없다 */
+export interface BacktestRun {
+  id: number;
+  strategy: string;
+  source: string;
+  params: Record<string, unknown>;
+  symbols: string[];
+  created_at: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  status: string;
+  progress: number | null;
+  error: string | null;
+  metrics: Partial<BacktestMetrics>;
+  cost_model: CostModelView | Record<string, never>;
+  holdout_cutoff: string | null;
+  unlocked_holdout: boolean;
+  attempt_no: number;
+  attempts?: { distinct_attempts: number; warn_after: number; overfit_warning: boolean };
+  warnings?: string[];
+  equity?: EquityPt[];
+  drawdown?: EquityPt[];
+  data_end?: string | null;
+  benchmark?: { symbol: string; label: string; points: EquityPt[]; drawdown: EquityPt[] } | null;
+  periods?: BacktestPeriod[];
+}
+
+/** backtest/metrics.py Metrics.to_dict */
+export interface BacktestMetrics {
+  start: string;
+  end: string;
+  years: number;
+  total_return: number;
+  cagr: number;
+  max_drawdown: number;
+  sharpe: number;
+  volatility: number;
+  n_trades: number;
+  win_rate: number;
+  avg_trade_return: number;
+  turnover_per_year: number;
+  total_costs: number;
+}
+
+/** GET /backtests 목록 한 행 (DB 행 그대로) */
+export interface BacktestListItem {
+  id: number;
+  ts: string;
+  strategy: string;
+  source: string;
+  params: Record<string, unknown>;
+  period_start: string | null;
+  period_end: string | null;
+  metrics: Partial<BacktestMetrics>;
+  attempt_no: number;
+  unlocked_holdout: boolean;
 }
 
 /** 지금 유효한 AI 판단 설정 (ADR 0032). active = 엔진이 실제로 쓰는 모델 (재시작 때 바뀐다) */

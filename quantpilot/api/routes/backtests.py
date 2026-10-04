@@ -52,6 +52,8 @@ BENCHMARK: dict[str, tuple[str, str]] = {
     "gtaa": ("360750", "TIGER 미국S&P500 보유"),
     "orb": ("QQQ", "나스닥100 보유"),
 }
+# 업비트 일봉은 개수로만 받는다 — 시작일이 있으면 그날부터 필요한 만큼, 최대 이만큼 (ADR 0033 §11)
+UPBIT_MAX_DAYS = 4000
 # 구간별 성과 행 (ADR 0033): 곡선이 이보다 짧으면 그 행은 뺀다
 PERIODS: tuple[tuple[str, str, int | None], ...] = (
     ("all", "전체 기간", None),
@@ -84,8 +86,23 @@ def load_data(req: BacktestRequest, strat: Any, cache_dir: Path) -> dict[str, pd
             data = synthetic.universe(symbols, periods=2000, start="2017-01-01")
     else:
         cache = CandleCache(cache_dir)
-        kw = {"start": req.start} if req.start and req.source != "upbit" else {}
-        data = {s: load(req.source, s, tf, cache=cache, **kw) for s in symbols}
+        kw: dict[str, Any] = {}
+        if req.start and req.source == "upbit" and tf == "1d":
+            days = (pd.Timestamp.now().normalize() - pd.Timestamp(req.start)).days + 30
+            kw["count"] = int(min(max(days, 200), UPBIT_MAX_DAYS))
+        elif req.start and req.source != "upbit":
+            kw["start"] = req.start
+        data = {}
+        for s in symbols:
+            df = load(req.source, s, tf, cache=cache, **kw)
+            if (
+                req.start
+                and len(df)
+                and df.index[0] > pd.Timestamp(req.start) + pd.Timedelta(days=7)
+            ):
+                # 캐시가 더 늦게 시작하면(이전에 짧게 받은 것) 시작일부터 다시 받는다 — 시작일이 조용히 무시되지 않게
+                df = load(req.source, s, tf, cache=cache, refresh=True, **kw)
+            data[s] = df
     if req.start or req.end:
         data = {s: df.loc[req.start : req.end] for s, df in data.items()}
     return data
@@ -123,7 +140,7 @@ def _series(points: list[dict[str, Any]] | None) -> pd.Series | None:
 def period_rows(
     equity: list[dict[str, Any]], bench: list[dict[str, Any]] | None
 ) -> list[dict[str, Any]]:
-    """구간별 성과: 전략 CAGR·MDD, 벤치마크 CAGR, 초과수익(%p). 전체 곡선으로 계산한다."""
+    """구간별 성과: 전략·벤치마크 CAGR·MDD, 초과수익(%p). 전체 곡선으로 계산한다."""
     s, b = _series(equity), _series(bench)
     if s is None or len(s) < 2:
         return []
@@ -137,7 +154,8 @@ def period_rows(
         if len(seg) < 2:
             continue
         bseg = b[(b.index >= start) & (b.index <= end)] if b is not None else None
-        bc = cagr(bseg) if bseg is not None and len(bseg) >= 2 else None
+        has_b = bseg is not None and len(bseg) >= 2
+        bc = cagr(bseg) if has_b else None
         c = cagr(seg)
         out.append(
             {
@@ -148,6 +166,7 @@ def period_rows(
                 "cagr": c,
                 "bench_cagr": bc,
                 "mdd": max_drawdown(seg),
+                "bench_mdd": max_drawdown(bseg) if has_b else None,
                 "excess": None if bc is None else c - bc,
             }
         )

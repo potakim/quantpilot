@@ -25,8 +25,9 @@ def test_period_rows_skip_windows_longer_than_curve():
     assert [r["key"] for r in rows] == ["all", "1y"]
     assert rows[0]["excess"] == pytest.approx(rows[0]["cagr"] - rows[0]["bench_cagr"])
     assert rows[0]["cagr"] > rows[0]["bench_cagr"] > 0
-    assert rows[0]["mdd"] == 0.0  # 계속 오르는 곡선
+    assert rows[0]["mdd"] == 0.0 and rows[0]["bench_mdd"] == 0.0  # 계속 오르는 곡선
     assert period_rows(eq, None)[0]["bench_cagr"] is None
+    assert period_rows(eq, None)[0]["bench_mdd"] is None
     assert period_rows(eq[:1], None) == []
 
 
@@ -53,3 +54,31 @@ def test_benchmark_curve_buys_and_holds_representative_symbol():
     sym, label, _ = benchmark_curve("gem", {"ACWX": other}, equity, 1000.0)
     assert (sym, label) == ("ACWX", "ACWX 보유")
     assert benchmark_curve("gem", {}, equity, 1000.0) is None
+
+
+def test_backtest_start_date_is_honored_for_upbit_and_stale_cache(monkeypatch, tmp_path):
+    """업비트는 시작일부터 필요한 개수를 받고, 캐시가 시작일보다 늦게 시작하면 다시 받는다 (ADR 0033 §11)."""
+    from quantpilot.api.routes.backtests import BacktestRequest, load_data
+    from quantpilot.data import loader
+    from quantpilot.strategies import create
+
+    calls: list[int] = []
+
+    def fake_upbit(market, tf="1d", count=1000, **_):
+        calls.append(count)
+        idx = pd.date_range(end=pd.Timestamp.now().normalize(), periods=count, freq="D")
+        px = pd.Series(100.0, index=idx)
+        return pd.DataFrame({"open": px, "high": px, "low": px, "close": px, "volume": 1.0})
+
+    monkeypatch.setattr(loader, "upbit_candles", fake_upbit)
+    strat = create("vol_breakout")
+    strat.symbols = ("KRW-BTC",)
+    # 시작일 없음: 기본 개수(최근 1,000일), 캐시에 저장
+    load_data(BacktestRequest(strategy="vol_breakout", source="upbit"), strat, tmp_path)
+    assert calls == [1000]
+    # 캐시보다 이른 시작일: 캐시는 늦게 시작하므로 시작일부터 필요한 만큼 새로 받는다
+    start = (pd.Timestamp.now().normalize() - pd.Timedelta(days=2000)).date().isoformat()
+    req = BacktestRequest(strategy="vol_breakout", source="upbit", start=start)
+    data = load_data(req, strat, tmp_path)
+    assert calls[1:] == [2030]
+    assert data["KRW-BTC"].index[0] <= pd.Timestamp(start) + pd.Timedelta(days=1)

@@ -211,6 +211,11 @@ async def test_get_settings_includes_locked_risk_rules(ctx):
 
 
 async def test_patch_settings_allowed_keys(ctx):
+    from quantpilot.api.routes.system import write_keys_file
+
+    # 판단 모델·리뷰어는 키가 있어야 저장된다 (ADR 0032) — 화면 키 등록과 같은 파일
+    keys = {"typesafe_api_key": "t", "anthropic_api_key": "a", "google_api_key": "g"}
+    write_keys_file(ctx.settings.keys_file, keys)
     patch = {
         "gate.hold_below": 0.55,
         "gate.full_above": 0.92,
@@ -243,6 +248,60 @@ async def test_patch_settings_rejects_bad_values(ctx, patch):
     r = await ctx.client.patch(f"{API}/settings", json=patch, headers=ctx.h)
     assert r.status_code == 400
     assert r.json()["error"]["code"] == "INVALID_PARAM"
+
+
+async def test_get_settings_reports_effective_judge_config(ctx):
+    """저장값이 없으면 환경변수 값, 키는 유무만, 엔진이 쓰는 모델은 active (ADR 0032)."""
+    r = await ctx.client.get(f"{API}/settings", headers=ctx.h)
+    assert r.json()["judge"] == {
+        "provider": "stub",
+        "llm_models": ["stub", "stub"],
+        "hold_below": 0.5,
+        "full_above": 0.9,
+        "keys": {"typesafe": False, "claude": False, "gemini": False},
+        "active": None,
+    }
+    config = SqlConfigRepo(ctx.sessions)
+    await config.set_setting("gate.hold_below", 0.6)
+    await config.set_setting(
+        "engine.judge.upbit", {"provider": "stub", "llm_models": ["stub", "stub"]}
+    )
+    judge = (await ctx.client.get(f"{API}/settings", headers=ctx.h)).json()["judge"]
+    assert judge["hold_below"] == 0.6 and judge["active"]["provider"] == "stub"
+
+
+@pytest.mark.parametrize(
+    ("patch", "code", "missing"),
+    [
+        ({"judge.provider": "typesafe"}, "KEY_MISSING", ["typesafe_api_key"]),
+        (
+            {"llm.models": ["claude", "gemini"]},
+            "KEY_MISSING",
+            ["anthropic_api_key", "google_api_key"],
+        ),
+        ({"judge.provider": "laya"}, "INVALID_PARAM", None),
+    ],
+)
+async def test_patch_settings_refuses_models_engine_cannot_use(ctx, patch, code, missing):
+    """키가 없거나 연결되지 않은 모델은 저장하지 않는다 — 재시작한 엔진이 쓸 수 없다 (ADR 0032)."""
+    r = await ctx.client.patch(f"{API}/settings", json=patch, headers=ctx.h)
+    assert r.status_code == 400 and r.json()["error"]["code"] == code
+    if missing:
+        assert r.json()["error"]["detail"]["keys"] == missing
+    assert await SqlConfigRepo(ctx.sessions).get_setting(next(iter(patch))) is None
+
+
+async def test_patch_settings_accepts_model_once_key_is_registered(ctx):
+    from quantpilot.api.routes.system import write_keys_file
+
+    write_keys_file(ctx.settings.keys_file, {"typesafe_api_key": "secret-value"})
+    r = await ctx.client.patch(
+        f"{API}/settings", json={"judge.provider": "typesafe"}, headers=ctx.h
+    )
+    assert r.status_code == 200, r.text
+    judge = (await ctx.client.get(f"{API}/settings", headers=ctx.h)).json()["judge"]
+    assert judge["provider"] == "typesafe" and judge["keys"]["typesafe"] is True
+    assert "secret-value" not in r.text
 
 
 # ── 불변식 #6: 리스크 규칙은 어디서도 완화되지 않는다 ──────────
@@ -377,6 +436,23 @@ async def test_strategies_list_merges_registry_and_config(ctx):
     assert (await ctx.client.get(f"{API}/strategies/nope", headers=ctx.h)).status_code == 404
 
 
+async def test_strategies_without_config_rows_show_recommended_defaults(ctx):
+    """설정 행이 없으면 권장 조합 기본값 — 엔진이 쓰는 값과 같다 (ADR 0032)."""
+    r = await ctx.client.get(f"{API}/strategies", headers=ctx.h)
+    by = {s["name"]: (s["enabled"], s["allocation"]) for s in r.json()}
+    assert by == {
+        "vol_breakout": (True, 0.15),
+        "gem": (False, 0.40),
+        "gtaa": (False, 0.35),
+        "orb": (False, 0.0),
+    }
+    # 한 값만 바꿔도 나머지는 기본값을 이어받는다
+    r = await ctx.client.patch(
+        f"{API}/strategies/vol_breakout", json={"params": {"k": 0.6}}, headers=ctx.h
+    )
+    assert r.json()["enabled"] is True and r.json()["allocation"] == 0.15
+
+
 async def test_patch_strategy_validates_params_and_allocation(ctx):
     url = f"{API}/strategies/vol_breakout"
     r = await ctx.client.patch(url, json={"params": {"k": 99}}, headers=ctx.h)
@@ -388,12 +464,18 @@ async def test_patch_strategy_validates_params_and_allocation(ctx):
     )
     assert r.status_code == 200, r.text
     assert r.json()["params"]["k"] == 0.4 and r.json()["allocation"] == 0.15
+    # 설정 행이 없는 GTAA도 기본 배분 0.35로 합에 들어간다 (ADR 0032)
     r = await ctx.client.patch(f"{API}/strategies/gem", json={"allocation": 0.6}, headers=ctx.h)
-    assert r.status_code == 200
-    r = await ctx.client.patch(f"{API}/strategies/gtaa", json={"allocation": 0.3}, headers=ctx.h)
+    assert r.status_code == 400  # 0.15 + 0.6 + 0.35 = 1.10
+    r = await ctx.client.patch(f"{API}/strategies/gem", json={"allocation": 0.5}, headers=ctx.h)
+    assert r.status_code == 200  # 합 1.00
+    r = await ctx.client.patch(f"{API}/strategies/gtaa", json={"allocation": 0.4}, headers=ctx.h)
     assert r.status_code == 400  # 합 1.05
+    r = await ctx.client.patch(f"{API}/strategies/gtaa", json={"allocation": 0.2}, headers=ctx.h)
+    assert r.status_code == 200  # 합 0.85
     r = await ctx.client.patch(f"{API}/strategies/orb", json={"allocation": 0.1}, headers=ctx.h)
-    assert r.status_code == 400  # intraday(vol_breakout+orb) 합 0.25 > 0.2
+    assert r.status_code == 400  # 합 0.95지만 intraday(vol_breakout+orb) 0.25 > 0.2
+    assert "intraday" in r.json()["error"]["message"]
     r = await ctx.client.post(f"{API}/strategies/vol_breakout/reset-params", headers=ctx.h)
     assert r.json()["params"]["k"] == 0.5 and r.json()["allocation"] == 0.15
 

@@ -23,6 +23,7 @@ const config: Config = {
         "up-bg": v("up-bg"),
         down: v("down"),
         "down-bg": v("down-bg"),
+        "down-2": v("down-2"),
         ok: v("ok"),
         "ok-ink": v("ok-ink"),
         "ok-bg": v("ok-bg"),

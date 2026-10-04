@@ -47,6 +47,27 @@ export interface Portfolio {
   halted: Record<string, string | null>;
 }
 
+/** 전략 파라미터 정의 (strategies/base.py ParamSpec). 숫자는 min·max·step, 참·거짓은 choices */
+export interface ParamSpecView {
+  name: string;
+  default: unknown;
+  min: number | null;
+  max: number | null;
+  step: number | null;
+  choices: unknown[];
+  description: string;
+}
+
+/** G1 검증 근거 (ops/g1.py, `qp gate g1 --write`). 지표 키는 전략마다 다르다 (cagr·mdd·mdd_monthly…) */
+export interface G1Evidence {
+  basis?: string;
+  period?: string;
+  metrics?: Record<string, number>;
+  reference?: Record<string, number>;
+  source?: string;
+  checked_at?: string;
+}
+
 export interface StrategyView {
   name: string;
   market: string;
@@ -54,11 +75,12 @@ export interface StrategyView {
   horizon: string;
   symbols: string[];
   params: Record<string, unknown>;
+  schema?: ParamSpecView[];
   enabled: boolean;
   allocation: number;
   paper: boolean;
   status: { position: Record<string, number>; month_pnl: number | null; mdd_30d: number | null };
-  gate: { g1?: { pass: boolean; reason?: string | null } };
+  gate: { g1?: { pass: boolean; reason?: string | null; evidence?: G1Evidence } };
 }
 
 export interface Page<T> {
@@ -212,10 +234,28 @@ export interface RiskRulesView {
   locked: true;
 }
 
+/** 지금 유효한 AI 판단 설정 (ADR 0032). active = 엔진이 실제로 쓰는 모델 (재시작 때 바뀐다) */
+export interface JudgeView {
+  provider: string;
+  llm_models: string[];
+  hold_below: number;
+  full_above: number;
+  keys: Record<string, boolean>;
+  active: { provider: string; llm_models: string[]; ts?: string } | null;
+}
+
 export interface SettingsView {
   settings: Record<string, unknown>;
   risk_rules: RiskRulesView;
   paper: boolean;
+  judge?: JudgeView;
+}
+
+/** GET /costs/ai — 이번 달 AI 호출 수·비용 (판단 모델 judge:*, 리뷰어 llm:*) */
+export interface CostsAi {
+  month: string;
+  by_provider: Record<string, { calls: number; usd: number }>;
+  total_usd: number;
 }
 
 export interface RiskEventRow {

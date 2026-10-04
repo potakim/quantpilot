@@ -25,6 +25,10 @@ on_time_exit·on_stop_check는 판단 모델을 거치지 않는다 (01 §3: 청
 
 신호 id(t18): `record_signal`을 주면 ON 원장 신호를 먼저 기록해 받은 id를 SignalEvent와 그 신호로 만든 ON 주문에
 싣는다. 그래야 OrderExecutor가 signals.outcome(ordered·filled·risk_rejected)을 남긴다. 섀도 주문에는 싣지 않는다.
+
+전략 설정(ADR 0032): 실시간 엔진은 `apply_configs`로 켜기/끄기·배분·파라미터를 넘긴다. 사이징·진입 판정의 기준은
+평가액 × 배분이고, 꺼졌거나 배분 0인 전략은 진입만 버린다(청산·손절·시간 청산은 그대로). 리스크 검사에는 계좌
+전체 평가액을 넘긴다. `apply_configs`를 부르지 않는 백테스트는 모든 전략이 켜짐·배분 1.0이다.
 """
 
 from __future__ import annotations
@@ -143,6 +147,49 @@ class TickRunner:
         self.rule_days: dict[str, dict[str, dict[str, set[str]]]] = {}
         self.rule_dirty = False  # MarketEngine이 우편함에 쓴 뒤 False로 돌린다
         self.done_dirty = False  # 처리 표시가 바뀌었다 → 우편함에 쓴다 (ADR 0028)
+        # 전략 설정 (ADR 0032): 이름 → (켜짐, 배분). None이면 백테스트 = 모두 켜짐·배분 1.0
+        self._configs: dict[str, tuple[bool, float]] | None = None
+        self._params: dict[
+            str, dict[str, Any]
+        ] = {}  # 마지막으로 반영한 설정 params (바뀔 때만 다시 만든다)
+
+    # ---------- 전략 설정 (ADR 0032) ----------
+    def apply_configs(self, configs: Mapping[str, Mapping[str, Any]]) -> None:
+        """유효 전략 설정 {이름: {enabled, allocation, params}}을 반영한다. 없는 전략은 꺼짐·배분 0."""
+        from quantpilot.strategies import create
+
+        self._configs = {
+            s.name: (
+                bool(configs.get(s.name, {}).get("enabled", False)),
+                max(0.0, float(configs.get(s.name, {}).get("allocation") or 0.0)),
+            )
+            for s in self.strategies
+        }
+        for i, s in enumerate(self.strategies):
+            params = dict(configs.get(s.name, {}).get("params") or {})
+            if self._params.get(s.name, {}) == params:
+                continue
+            try:
+                self.strategies[i] = create(s.name, **params)
+            except (TypeError, ValueError) as e:
+                log.error(
+                    "전략 파라미터 반영 실패 — 이전 파라미터 유지",
+                    extra={"strategy": s.name, "error": str(e)},
+                )
+                continue
+            self._params[s.name] = params
+            log.info("전략 파라미터 반영", extra={"strategy": s.name, "params": params})
+
+    def allocation(self, name: str) -> float:
+        """사이징에 쓰는 배분 (평가액 × 배분 = 배정 자본)."""
+        return 1.0 if self._configs is None else self._configs.get(name, (False, 0.0))[1]
+
+    def entries_allowed(self, name: str) -> bool:
+        """켜져 있고 배분이 0보다 큰 전략만 비중을 늘릴 수 있다."""
+        if self._configs is None:
+            return True
+        enabled, alloc = self._configs.get(name, (False, 0.0))
+        return enabled and alloc > 0
 
     # ---------- 이벤트 입구 ----------
     async def on_bar_closed(self, ev: BarClosed) -> None:
@@ -185,11 +232,15 @@ class TickRunner:
             ctx = Context(
                 ts=pd.Timestamp(ts), bars=sbars, positions=positions, equity=equity, params=s.params
             )
+            base = equity * self.allocation(s.name)
             got = [
-                _Candidate(s, t, ctx, self._increases(t, sbars, positions, equity))
+                _Candidate(s, t, ctx, self._increases(t, sbars, positions, base))
                 for t in s.on_bar(ctx) or []
             ]
-            self._note_rules(s, sbars, got, ts)
+            if self.entries_allowed(s.name):
+                self._note_rules(s, sbars, got, ts)
+            else:  # 꺼짐·배분 0: 비중을 늘리려는 target은 버리고 청산·축소만 남긴다 (ADR 0032)
+                got = [c for c in got if not self._increases(c.target, sbars, positions, equity)]
             cands += [c for c in got if not self._done_today(c, ts)] if self._daily_mode(s) else got
         if not cands:
             return
@@ -217,9 +268,10 @@ class TickRunner:
                 # 진입 여부는 앞서 처리한 청산을 반영해 다시 본다. 평가 시점에는 어제 산 보유분이 남아 있어
                 # 같은 날 '청산 후 재진입'의 진입이 진입으로 분류되지 않고 판단 모델·사이징 규칙을 건너뛰었다
                 now_pos = dict(self.executor.positions())
-                c = replace(
-                    c, grows=self._increases(t, c.ctx.bars, now_pos, equities[id(self._on)])
-                )
+                base = equities[id(self._on)] * self.allocation(c.strategy.name)
+                c = replace(c, grows=self._increases(t, c.ctx.bars, now_pos, base))
+                if c.grows and not self.entries_allowed(c.strategy.name):
+                    continue
             if self._daily_mode(c.strategy):
                 self._mark_done(c, ts)
             # 체결 기준가는 지금 들어온 봉의 범위 안에서 정한다. 일봉 모드도 오늘 일봉이 아니라 이 분봉이다 —
@@ -326,9 +378,9 @@ class TickRunner:
         """6~8단계: 사이징 → risk.check → submit → 발행(섀도는 발행 안 함)."""
         s, t = c.strategy, c.target
         ex = b.executor
-        # 6. 사이징
+        # 6. 사이징 — 배정 자본(평가액 × 배분) 기준. 리스크 검사는 아래에서 계좌 전체 평가액으로 (ADR 0032)
         pos = ex.positions().get(t.symbol)
-        sized = self._size(t, ref, equity, mult, pos, ex)
+        sized = self._size(t, ref, equity * self.allocation(s.name), mult, pos, ex)
         if sized is None:
             return
         side, qty = sized

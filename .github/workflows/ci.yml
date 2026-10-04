@@ -54,7 +54,7 @@ jobs:
   # 웹 화면 (P1-13, ADR 0018). Node 도구는 web/ 안에만 있다 — 위 python 잡과 따로 돈다.
   #   1. eslint(+jsx-a11y) · tsc · vitest · next build · 비밀 누출 검사(check-secrets)
   #   2. 데모 API(scripts/web_demo_api.py, 합성 데이터) + next start
-  #   3. Lighthouse 접근성 90+ — 데스크톱 4화면(lighthouserc.json) + 모바일 대시보드(lighthouserc.mobile.json)
+  #   3. Lighthouse 접근성 90+ — 데스크톱 5화면(lighthouserc.json) + 모바일 대시보드(lighthouserc.mobile.json)
   # 데모 API 비밀번호·시크릿은 실행마다 무작위로 만든다 (저장소에 값 없음).
   web:
     name: web (lint · test · build · lighthouse)

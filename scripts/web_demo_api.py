@@ -123,6 +123,7 @@ def _book(price: float) -> dict[str, list[list[float]]]:
 
 async def seed(sessions: Any, hub: Any, *, halt: bool) -> dict[str, float]:
     """합성 데이터를 심고 심볼별 마지막 가격을 돌려준다."""
+    from quantpilot.api.gates import g1_key
     from quantpilot.db.repo import (
         SqlCandleRepo,
         SqlConfigRepo,
@@ -131,30 +132,36 @@ async def seed(sessions: Any, hub: Any, *, halt: bool) -> dict[str, float]:
         SqlPositionRepo,
         SqlRiskEventRepo,
     )
-    from quantpilot.engine.link import SettingsEngineLink
+    from quantpilot.engine.link import SettingsEngineLink, active_judge_key
     from quantpilot.judgment.base import LLMVerdict, State
     from quantpilot.realtime import keys as hk
     from quantpilot.realtime.bus import EventRecorder
     from quantpilot.scheduler.backup import restore_account
     from quantpilot.scheduler.jobs.health import month_start_key
-    from quantpilot.strategies import REGISTRY
+    from quantpilot.strategies import REGISTRY, strategy_config
 
     config = SqlConfigRepo(sessions)
-    plan = {
-        "vol_breakout": (0.15, True),
-        "gem": (0.40, True),
-        "gtaa": (0.35, True),
-        "orb": (0.0, False),
-    }
+    # 배포 직후와 같은 권장 조합 기본값 (ADR 0032)
     for name, cls in REGISTRY.items():
-        alloc, enabled = plan.get(name, (0.0, False))
-        await config.upsert_strategy(
-            name=name,
-            market=cls.market,
-            allocation=alloc,
-            symbols=list(cls.symbols),
-            enabled=enabled,
+        await config.upsert_strategy(name=name, market=cls.market, **strategy_config(name))
+    # G1 근거 (2026-10-04 `qp gate g1` 실데이터 실행 결과를 반올림한 값) — 카드의 백테스트 요약 표시용
+    g1 = {
+        "vol_breakout": (
+            "2017-09-25~2025-10-03",
+            {"cagr": 0.0633, "mdd": -0.0853, "entries": 3719},
+        ),
+        "gem": (
+            "2008-01-02~2025-10-02",
+            {"cagr": 0.083, "mdd_monthly": -0.209, "sharpe_monthly": 0.70},
+        ),
+    }
+    for name, (period, metrics) in g1.items():
+        await config.set_setting(
+            g1_key(name), {"within_20pct": True, "period": period, "metrics": metrics}
         )
+    await config.set_setting(
+        active_judge_key(UP), {"provider": "stub", "llm_models": ["stub", "stub"]}
+    )
 
     now_local = MarketClock(UP).now().replace(second=0, microsecond=0)
     start = now_local - timedelta(minutes=MINUTES - 1)

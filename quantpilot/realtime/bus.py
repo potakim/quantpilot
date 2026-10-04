@@ -102,16 +102,17 @@ class EventRecorder:
         )
 
     async def signal(self, ev: SignalEvent) -> int:
-        """신호 1건을 쓰고 id를 돌려준다. 전략 설정 행이 없으면 allocation 0으로 만든다."""
+        """신호 1건을 쓰고 id를 돌려준다. 전략 설정 행이 없으면 기본 설정으로 만든다 (ADR 0032)."""
         sid = await self.config.strategy_id(ev.strategy, ev.market)
         if sid is None:
-            sid = await self.config.upsert_strategy(
-                name=ev.strategy,
-                market=ev.market,
-                allocation=0.0,
-                symbols=[ev.target.symbol],
-                enabled=True,
+            from quantpilot.strategies import REGISTRY, strategy_config
+
+            cfg = (
+                strategy_config(ev.strategy)
+                if ev.strategy in REGISTRY
+                else {"allocation": 0.0, "symbols": [ev.target.symbol], "enabled": True}
             )
+            sid = await self.config.upsert_strategy(name=ev.strategy, market=ev.market, **cfg)
             log.warning(
                 "전략 설정 행이 없어 새로 만들었다",
                 extra={"strategy": ev.strategy, "market": Market(ev.market).value},

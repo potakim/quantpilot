@@ -40,7 +40,7 @@ FastAPI, base `/api/v1`. 인증은 `Authorization: Bearer <JWT>` (단일 사용�
 
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
-| GET | `/strategies` | 등록 전략 + 설정 병합: `[{name, market, timeframe, horizon, symbols, params, schema, enabled, allocation, paper, status:{position, month_pnl, mdd_30d}, gate:{...}}]`. 설정 행이 없으면 권장 조합 기본값(변동성 돌파 켜짐·0.15, GEM 꺼짐·0.40, GTAA 꺼짐·0.35, ORB 꺼짐·0) — 엔진도 같은 값을 쓴다 (ADR 0032). `month_pnl`은 월초(시장 현지) 이후 전략 손익률, `mdd_30d`는 최근 30일 최대 낙폭(양수 비율). 전략 체결 재생 + 1시간 종가 평가, 자본 기준은 allocation × 월초 평가액(없으면 초기 자금). 해당 기간 체결이나 시세가 없으면 null (ADR 0020) |
+| GET | `/strategies` | 등록 전략 + 설정 병합: `[{name, market, timeframe, horizon, symbols, params, schema, enabled, allocation, paper, cost_model, status:{position, month_pnl, mdd_30d}, gate:{...}}]`. `cost_model`은 그 시장의 비용 모델(백테스터·PaperBroker와 같은 값, ADR 0033). 설정 행이 없으면 권장 조합 기본값(변동성 돌파 켜짐·0.15, GEM 꺼짐·0.40, GTAA 꺼짐·0.35, ORB 꺼짐·0) — 엔진도 같은 값을 쓴다 (ADR 0032). `month_pnl`은 월초(시장 현지) 이후 전략 손익률, `mdd_30d`는 최근 30일 최대 낙폭(양수 비율). 전략 체결 재생 + 1시간 종가 평가, 자본 기준은 allocation × 월초 평가액(없으면 초기 자금). 해당 기간 체결이나 시세가 없으면 null (ADR 0020) |
 | GET | `/strategies/{name}` | 단일 |
 | PATCH | `/strategies/{name}` | `{enabled?, params?, allocation?, symbols?}` — params는 ParamSpec 검증, allocation 합 ≤ 1, intraday 합 ≤ 0.2 (설정 행이 없는 전략은 기본 배분으로 합에 들어간다). 엔진은 하트비트마다 enabled·allocation·params를 읽는다: 꺼짐·배분 0은 진입만 막고, 사이징은 평가액 × allocation. symbols는 시세 구독 범위라 엔진에 아직 반영하지 않는다 (ADR 0032) |
 | POST | `/strategies/{name}/reset-params` | 기본값 복원 |
@@ -51,8 +51,8 @@ FastAPI, base `/api/v1`. 인증은 `Authorization: Bearer <JWT>` (단일 사용�
 
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
-| POST | `/backtests` | 요청: `{strategy, params?, symbols?, source, start?, end?, initial_cash?, unlock_holdout?}` → 202 `{id, status:"queued"}`. 실행은 워커 스레드, 진행은 WS `backtest.progress` |
-| GET | `/backtests/{id}` | `{status, metrics, cost_model, holdout_cutoff, attempts:{distinct_attempts, warn_after, overfit_warning}, warnings, equity:[{ts,v}], drawdown:[{ts,v}], fills_tail:[...], public_reference?:{cagr, mdd, source, within_20pct}}` |
+| POST | `/backtests` | 요청: `{strategy, params?, symbols?, source, start?, end?, initial_cash?, unlock_holdout?}` → 202 `{id, status:"queued"}`. 실행은 워커 스레드, 진행은 WS `backtest:{id}` `{progress, stage, done?, status?, error?}` |
+| GET | `/backtests/{id}` | `{id, strategy, source, params, symbols, created_at, period_start, period_end, status, progress, error, metrics, cost_model, holdout_cutoff, unlocked_holdout, attempt_no, attempts:{distinct_attempts, warn_after, overfit_warning}, warnings, equity:[{ts,v}], drawdown:[{ts,v}], data_end, benchmark:{symbol, label, points:[{ts,v}], drawdown:[{ts,v}]}\|null, periods:[{key, label, start, end, cagr, bench_cagr, mdd, excess}], fills_tail:[...]}`. 곡선은 최대 500점. 벤치마크 = 대표 종목을 처음에 사서 들고 있기(비용 없음, GEM=SPY·변동성 돌파=KRW-BTC·GTAA=360750·ORB=QQQ), `periods`는 전체 곡선으로 계산한 전체 기간·최근 3년·최근 1년(곡선보다 긴 구간은 뺀다), `data_end`는 홀드아웃으로 자르기 전 데이터의 마지막 시각. ADR 0033 이전 결과는 `benchmark`·`data_end`가 null (ADR 0033) |
 | GET | `/backtests?strategy=` | 목록 (attempt_no 포함) |
 | GET | `/backtests/{id}/report.csv` | 체결 전체 CSV |
 

@@ -3,6 +3,9 @@
 요청 즉시 backtests 행을 만들어 id를 돌려주고(202), 실행이 끝나면 지표·시도 횟수를 채운다.
 자산곡선·체결 전체는 `data_dir/backtests/<id>.json`(equity_path)에 둔다.
 `unlock_holdout=true`는 전략당 1회 (불변식 #5) — 두 번째 요청은 409 GATE_LOCKED.
+
+화면 지표(ADR 0033): 벤치마크 = 대표 종목을 처음에 사서 들고 있기(비용 없음), 구간별 성과는 전체 곡선으로
+서버에서 계산(전체·최근 3년·최근 1년), `data_end` = 홀드아웃으로 잘라내기 전 데이터의 마지막 날.
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ from quantpilot.api.errors import ApiError
 from quantpilot.api.routes.strategies import create_checked
 from quantpilot.backtest import AttemptTracker, Backtester, preset
 from quantpilot.backtest.attempts import WARN_AFTER
+from quantpilot.backtest.reference import cagr, max_drawdown
 from quantpilot.core.models import Market
 from quantpilot.realtime import keys as hk
 from quantpilot.realtime.bus import message
@@ -41,6 +45,19 @@ router = APIRouter(dependencies=[Depends(require_user)])
 SOURCES = ("synthetic", "upbit", "yfinance", "fdr")
 EQUITY_POINTS = 500
 FILLS_TAIL = 200
+# 전략별 벤치마크 (ADR 0033): 전략 데이터 안의 대표 종목. 없으면 첫 종목
+BENCHMARK: dict[str, tuple[str, str]] = {
+    "gem": ("SPY", "S&P 500 보유"),
+    "vol_breakout": ("KRW-BTC", "비트코인 보유"),
+    "gtaa": ("360750", "TIGER 미국S&P500 보유"),
+    "orb": ("QQQ", "나스닥100 보유"),
+}
+# 구간별 성과 행 (ADR 0033): 곡선이 이보다 짧으면 그 행은 뺀다
+PERIODS: tuple[tuple[str, str, int | None], ...] = (
+    ("all", "전체 기간", None),
+    ("3y", "최근 3년", 3),
+    ("1y", "최근 1년", 1),
+)
 
 
 class BacktestRequest(BaseModel):
@@ -74,6 +91,69 @@ def load_data(req: BacktestRequest, strat: Any, cache_dir: Path) -> dict[str, pd
     return data
 
 
+def benchmark_curve(
+    strategy: str, data: dict[str, pd.DataFrame], equity: pd.Series, cash: float
+) -> tuple[str, str, pd.Series] | None:
+    """대표 종목을 처음에 사서 끝까지 들고 있기 (비용 없음). 전략 곡선 시각에 직전 종가로 맞춘다."""
+    sym, label = BENCHMARK.get(strategy, ("", ""))
+    if sym not in data:
+        if not data:
+            return None
+        sym = next(iter(data))
+        label = f"{sym} 보유"
+    eq = equity.dropna()
+    if eq.empty:
+        return None
+    close = data[sym]["close"].astype(float).sort_index()
+    close = close[~close.index.duplicated(keep="last")]
+    aligned = close.reindex(eq.index, method="ffill").dropna()
+    if aligned.empty or float(aligned.iloc[0]) <= 0:
+        return None
+    return sym, label, cash * aligned / float(aligned.iloc[0])
+
+
+def _series(points: list[dict[str, Any]] | None) -> pd.Series | None:
+    if not points:
+        return None
+    return pd.Series(
+        [float(p["v"]) for p in points], index=pd.to_datetime([p["ts"] for p in points])
+    )
+
+
+def period_rows(
+    equity: list[dict[str, Any]], bench: list[dict[str, Any]] | None
+) -> list[dict[str, Any]]:
+    """구간별 성과: 전략 CAGR·MDD, 벤치마크 CAGR, 초과수익(%p). 전체 곡선으로 계산한다."""
+    s, b = _series(equity), _series(bench)
+    if s is None or len(s) < 2:
+        return []
+    end = s.index[-1]
+    out = []
+    for key, label, years in PERIODS:
+        start = s.index[0] if years is None else end - pd.DateOffset(years=years)
+        if start < s.index[0]:
+            continue
+        seg = s[s.index >= start]
+        if len(seg) < 2:
+            continue
+        bseg = b[(b.index >= start) & (b.index <= end)] if b is not None else None
+        bc = cagr(bseg) if bseg is not None and len(bseg) >= 2 else None
+        c = cagr(seg)
+        out.append(
+            {
+                "key": key,
+                "label": label,
+                "start": seg.index[0].isoformat(),
+                "end": seg.index[-1].isoformat(),
+                "cagr": c,
+                "bench_cagr": bc,
+                "mdd": max_drawdown(seg),
+                "excess": None if bc is None else c - bc,
+            }
+        )
+    return out
+
+
 def run_blocking(req: BacktestRequest, settings: Any) -> dict[str, Any]:
     """백테스트 1회 (블로킹). 결과 dict: summary·equity·fills·attempts."""
     strat = create_checked(req.strategy, req.params)
@@ -92,12 +172,22 @@ def run_blocking(req: BacktestRequest, settings: Any) -> dict[str, Any]:
         allow_short=bool(strat.params.get("allow_short", False)),
     )
     res = bt.run(strat, data, attempts=AttemptTracker(settings.attempts_file))
+    data_end = max((df.index[-1] for df in data.values() if len(df)), default=None)
+    bench = benchmark_curve(req.strategy, data, res.equity, cash)
     return {
         "metrics": res.metrics.to_dict(),
         "holdout_cutoff": res.holdout_cutoff.date() if res.holdout_cutoff is not None else None,
+        "data_end": data_end.isoformat() if data_end is not None else None,
         "warnings": list(res.warnings),
         "attempts": res.attempts or {},
         "equity": [{"ts": t.isoformat(), "v": float(v)} for t, v in res.equity.items()],
+        "benchmark": None
+        if bench is None
+        else {
+            "symbol": bench[0],
+            "label": bench[1],
+            "points": [{"ts": t.isoformat(), "v": float(v)} for t, v in bench[2].items()],
+        },
         "fills": [to_jsonable(f) for f in res.fills],
     }
 
@@ -128,7 +218,7 @@ async def run_job(deps: Deps, pool: Any, bid: int, req: BacktestRequest) -> None
         return
     path = Path(deps.settings.data_dir) / "backtests" / f"{bid}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    blob = {k: out[k] for k in ("equity", "fills", "warnings", "attempts")}
+    blob = {k: out[k] for k in ("equity", "fills", "warnings", "attempts", "benchmark", "data_end")}
     path.write_text(json.dumps(blob, ensure_ascii=False, default=str), encoding="utf-8")
     eq = out["equity"]
     async with deps.sessions.begin() as s:
@@ -238,6 +328,12 @@ async def get_backtest(
     out: dict[str, Any] = {
         "id": bid,
         "strategy": row["strategy"],
+        "source": row["source"],
+        "params": row["params"],
+        "symbols": row["symbols"],
+        "created_at": row["ts"],
+        "period_start": row["period_start"],
+        "period_end": row["period_end"],
         "status": status,
         "progress": state.get("progress"),
         "error": state.get("error"),
@@ -252,6 +348,9 @@ async def get_backtest(
     eq = blob["equity"]
     step = max(1, -(-len(eq) // EQUITY_POINTS))  # 최대 EQUITY_POINTS점
     att = blob.get("attempts") or {}
+    bench = blob.get("benchmark")  # ADR 0033 이전 결과에는 없다
+    bpts = (bench or {}).get("points") or []
+    bstep = max(1, -(-len(bpts) // EQUITY_POINTS))
     out.update(
         {
             "attempts": {
@@ -262,6 +361,16 @@ async def get_backtest(
             "warnings": blob.get("warnings", []),
             "equity": eq[::step],
             "drawdown": _drawdown(eq)[::step],
+            "data_end": blob.get("data_end"),
+            "benchmark": None
+            if not bpts
+            else {
+                "symbol": bench.get("symbol"),
+                "label": bench.get("label"),
+                "points": bpts[::bstep],
+                "drawdown": _drawdown(bpts)[::bstep],
+            },
+            "periods": period_rows(eq, bpts or None),
             "fills_tail": blob["fills"][-FILLS_TAIL:],
         }
     )

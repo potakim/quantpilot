@@ -7,6 +7,7 @@ import { apiFetch } from "@/lib/api";
 import type {
   AbReport,
   Calibration,
+  CostsAi,
   EquityCurve,
   FillRow,
   Gates,
@@ -63,6 +64,9 @@ export const useGates = () =>
 
 export const useSettings = () =>
   useQuery({ queryKey: ["settings"], queryFn: () => apiFetch<SettingsView>("/settings"), staleTime: 60_000 });
+
+export const useCostsAi = () =>
+  useQuery({ queryKey: ["costs-ai"], queryFn: () => apiFetch<CostsAi>("/costs/ai"), staleTime: 300_000 });
 
 export interface JudgmentFilter {
   from?: string;

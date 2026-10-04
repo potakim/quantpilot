@@ -119,7 +119,7 @@ FastAPI, base `/api/v1`. 인증은 `Authorization: Bearer <JWT>` (단일 사용�
 | --- | --- |
 | 대시보드 | `/portfolio`(오늘 손익 `today_pnl_krw`), `/portfolio/equity`(자산 곡선 30/90/365일), `/schedule`(오늘 일정), `/strategies`(이번 달·MDD), `/judgments?limit=5`, `/reports/gates`, WS `portfolio`·`judgments`·`strategy.status`(일정은 REST `/schedule`에 WS 항목을 덧붙인다) |
 | 거래·차트 | `/quotes`(주문 패널 수수료 행 `fee_rate`), `/candles`, `/orders`, `/positions`, `/judgments?symbol=`, POST `/orders`, WS `ticks`·`orderbook`·`fills` |
-| 전략 설정 | `/strategies`, PATCH, `/backtests?strategy=`, `/reports/gates`, `/settings` |
+| 전략 설정 | `/strategies`, PATCH, `/strategies/{name}/reset-params`, `/portfolio`(총 자본·시장 계좌), `/settings`(리스크 규칙·`judge`), PATCH `/settings`, `/costs/ai`, 백테스트 보기 → `/backtests?strategy=` |
 | AI 판단 로그 | `/judgments`, `/judgments/{id}`, `/judgments/calibration`, `/judgments/ab`, POST `/ask` |
 | 백테스트 | POST `/backtests`, GET `/backtests/{id}`, WS `backtest:{id}` |
 | 설정 | `/settings`, 키 등록(POST `/settings/keys`, 값은 저장만 하고 절대 반환하지 않음) |

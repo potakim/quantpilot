@@ -9,17 +9,20 @@ export function Card({
   children,
   className,
   ai = false,
+  line,
   as: Tag = "section",
   ...rest
 }: {
   children: ReactNode;
   className?: string;
   ai?: boolean;
+  /** 테두리 색 클래스 (기본 border-line, ai면 border-ai-line). 같이 붙이면 어느 쪽이 이길지 모르므로 바꿔 끼운다 */
+  line?: string;
   as?: "section" | "div" | "aside" | "article";
 } & React.HTMLAttributes<HTMLElement>) {
   return (
     <Tag
-      className={cx("rounded-card border bg-bg2", ai ? "border-ai-line" : "border-line", className)}
+      className={cx("rounded-card border bg-bg2", line ?? (ai ? "border-ai-line" : "border-line"), className)}
       {...rest}
     >
       {children}

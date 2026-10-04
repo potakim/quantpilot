@@ -143,6 +143,9 @@ def fdr_daily(code: str, start: str = "2010-01-01", end: str | None = None) -> p
 
 
 # ---------------- 통합 ----------------
+DAILY_ONLY = frozenset({"yfinance", "fdr"})  # 일봉만 주는 소스
+
+
 def load(
     source: str,
     symbol: str,
@@ -156,6 +159,9 @@ def load(
         hit = cache.load(source, symbol, tf)
         if hit is not None and len(hit):
             return hit
+    if source in DAILY_ONLY and tf != "1d":
+        # 일봉을 분봉 이름으로 돌려주면 분봉 전략(ORB)이 조용히 매매 0건이 된다 (ADR 0031)
+        raise ValueError(f"{source}는 일봉(1d)만 제공한다: {symbol} {tf}")
     if source == "upbit":
         df = upbit_candles(symbol, tf, **kw)
     elif source == "yfinance":

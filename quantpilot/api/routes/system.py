@@ -20,7 +20,7 @@ from quantpilot import __version__
 from quantpilot.api.auth import require_user
 from quantpilot.api.deps import Deps, DepsDep
 from quantpilot.api.errors import ApiError
-from quantpilot.core.models import Market
+from quantpilot.core.models import LIVE_MARKETS, Market
 from quantpilot.engine.link import SettingsEngineLink
 from quantpilot.execution.risk import RiskRules
 from quantpilot.realtime import keys as hk
@@ -85,6 +85,8 @@ async def health(
         "engine_alive": False,
         "ws_connected": {"upbit": False, "kis": False},
         "halted": {m.value: None for m in Market},
+        # 실시간 엔진이 도는 시장 — 화면은 나머지 시장을 "2단계 예정"으로 보인다 (ADR 0031)
+        "live_markets": sorted(m.value for m in LIVE_MARKETS),
     }
     try:
         out["ws_connected"] = {

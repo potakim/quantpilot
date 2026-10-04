@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { DASH } from "@/lib/format";
-import { curvePaths, feeRowText, scheduleRows, strategyMddText, strategyMonthText, todayPnlView } from "@/lib/metrics";
+import {
+  cashKrw,
+  curvePaths,
+  feeRowText,
+  scheduleRows,
+  strategyMddText,
+  strategyMonthText,
+  todayPnlView,
+} from "@/lib/metrics";
 import type { Portfolio, ScheduleItem } from "@/lib/types";
 
 function portfolio(today: number | null): Portfolio {
@@ -27,6 +35,22 @@ describe("오늘 손익", () => {
   it("null이면 —", () => {
     expect(todayPnlView(portfolio(null))).toEqual({ value: DASH, pct: DASH, tone: "muted" });
     expect(todayPnlView(undefined).value).toBe(DASH);
+  });
+});
+
+describe("현금 합계 (ADR 0031)", () => {
+  const acct = (cash: number, active?: boolean) => ({ active, cash, equity: cash, positions: [], today_pnl: null });
+  it("운영 중이 아닌 시장의 초기 현금은 더하지 않는다", () => {
+    const p = { ...portfolio(null), by_market: { upbit: acct(9_000_000, true), krx: acct(10_000_000, false), us: acct(10_000, false) } };
+    expect(cashKrw(p)).toBe(9_000_000);
+  });
+  it("저장된 계좌가 있는 시장은 더하고, 미국은 환율이 있을 때만", () => {
+    const by = { upbit: acct(9_000_000, true), krx: acct(3_000_000, true), us: acct(1_000, true) };
+    expect(cashKrw({ ...portfolio(null), by_market: by })).toBe(12_000_000);
+    expect(cashKrw({ ...portfolio(null), by_market: by, fx: { usdkrw: 1_400, source: "x" } })).toBe(13_400_000);
+  });
+  it("active 필드가 없는 옛 응답은 지금처럼 더한다", () => {
+    expect(cashKrw({ ...portfolio(null), by_market: { upbit: acct(1), krx: acct(2) } })).toBe(3);
   });
 });
 
@@ -66,6 +90,7 @@ describe("오늘 일정", () => {
     expect(rows.map((r) => r.name)).toEqual(["upbit_daily_exit", "vol_breakout", "krx_close_orders"]);
     expect(rows[0]!.done).toBe(true);
     expect(rows[1]!.what).toBe("KRW-BTC 목표가 ₩52,000,000 돌파 시 진입");
+    expect(rows[1]!.market).toBe("upbit"); // WS가 덮어도 REST의 시장은 남는다 (출처 문구용)
     expect(rows.every((r) => r.what !== DASH)).toBe(true);
   });
   it("문구가 없으면 —, 데이터가 없으면 빈 목록", () => {

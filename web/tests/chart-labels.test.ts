@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { applyTick, movingAverage, TF_SECONDS, toBars } from "@/lib/chart-data";
-import { answerRows, gateLabel, judgmentResult, verdictLabel } from "@/lib/labels";
+import { applyTick, axisPrice, movingAverage, TF_SECONDS, toBars } from "@/lib/chart-data";
+import { answerRows, gateLabel, judgmentResult, scheduleSource, verdictLabel } from "@/lib/labels";
+
+describe("일정 출처 문구 (ADR 0031)", () => {
+  it("전략이면 전략 이름, 잡이면 시장 이름, 시장 없으면 공통 — 잡 ID를 내지 않는다", () => {
+    expect(scheduleSource("vol_breakout", "upbit")).toBe("변동성 돌파");
+    expect(scheduleSource("upbit_daily_exit", "upbit")).toBe("업비트");
+    expect(scheduleSource("daily_review", null)).toBe("공통");
+  });
+});
 
 describe("캔들 변환·이동평균", () => {
   const raw = [
@@ -35,6 +43,22 @@ describe("applyTick", () => {
   it("과거 틱·봉 없음은 null", () => {
     expect(applyTick(bars, 300, t0 - 10, 8)).toBeNull();
     expect(applyTick([], 300, t0, 8)).toBeNull();
+  });
+  it("일봉은 API 봉의 시작 시각(UTC 자정이 아님)을 따른다 — 하루 중간에 새 봉을 만들지 않는다 (ADR 0031)", () => {
+    const kstMidnight = Date.parse("2026-10-03T15:00:00Z") / 1000; // 10/4 00:00 KST
+    const day = [{ time: kstMidnight, open: 10, high: 12, low: 9, close: 11, volume: 1 }];
+    const noonKst = kstMidnight + 12 * 3600; // UTC 자정(09:00 KST)을 지난 틱
+    expect(applyTick(day, 86400, noonKst, 13)?.time).toBe(kstMidnight);
+    expect(applyTick(day, 86400, kstMidnight + 86400 + 5, 8)?.time).toBe(kstMidnight + 86400);
+  });
+});
+
+describe("차트 가격축", () => {
+  it("큰 가격은 정수 + 천 단위 쉼표, 작은 가격은 소수", () => {
+    expect(axisPrice(151_000_000)).toBe("151,000,000");
+    expect(axisPrice(512.3)).toBe("512.3");
+    expect(axisPrice(1.05)).toBe("1.05");
+    expect(axisPrice(0.000123)).toBe("0.0001");
   });
 });
 

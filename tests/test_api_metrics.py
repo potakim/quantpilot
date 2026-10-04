@@ -145,7 +145,21 @@ async def test_equity_curve_validates_days_and_empty_is_not_error(ctx):
 # ── 오늘 일정 (/schedule) ─────────────────────────────────
 
 
-async def test_schedule_lists_today_jobs_with_done_flags_and_breakout_target(ctx):
+async def test_schedule_omits_markets_without_live_engine(ctx):
+    """1단계: KRX·미국 잡과 연결되지 않은 아침 브리핑은 일정에 없다. 항목마다 한국어 title (ADR 0031)."""
+    items = (await ctx.client.get(f"{API}/schedule", headers=ctx.h)).json()
+    names = {i["name"] for i in items}
+    assert {"krx_close_orders", "kis_token_refresh", "us_orb_entry_window"}.isdisjoint(names)
+    assert {"us_eod_exit", "gem_rebalance", "morning_brief"}.isdisjoint(names)
+    assert {"upbit_daily_exit", "upbit_prescreen", "vol_breakout"} <= names
+    assert all(i["title"] and not i["title"].isascii() for i in items)
+
+
+async def test_schedule_lists_today_jobs_with_done_flags_and_breakout_target(ctx, monkeypatch):
+    from quantpilot.api.routes import schedule
+
+    # 2단계처럼 모든 시장에 엔진이 있다고 보고 시장별 시각·휴장 계산을 확인한다
+    monkeypatch.setattr(schedule, "LIVE_MARKETS", frozenset(Market))
     nine = LOCAL.replace(hour=9, minute=0)
     # 전일 09:00 ~ 오늘 09:00 1분봉: 고가 52M·저가 48M, 마지막 종가 50M → 목표가 50M + 4M × 0.5
     closes = [48_000_000, 52_000_000] + [50_000_000] * 22

@@ -14,6 +14,11 @@ class Market(str, Enum):
     US = "us"  # 미국주식·ETF
 
 
+# 실시간 엔진이 도는 시장 (ADR 0031). 계좌 합계·일정·수동 주문·화면 표시가 이 집합을 따른다.
+# 2단계에서 KRX·미국 엔진을 붙이면 여기에만 추가한다.
+LIVE_MARKETS: frozenset[Market] = frozenset({Market.UPBIT})
+
+
 class Side(str, Enum):
     BUY = "buy"
     SELL = "sell"

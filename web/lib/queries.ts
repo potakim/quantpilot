@@ -2,7 +2,7 @@
 
 // TanStack Query 훅 모음. 화면의 숫자는 전부 여기서 받은 API 응답이다 (docs/10 §5).
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { apiFetch } from "@/lib/api";
 import type {
   AbReport,
@@ -35,6 +35,12 @@ const qs = (params: Record<string, string | number | undefined | null>) => {
 
 export const useHealth = () =>
   useQuery({ queryKey: ["health"], queryFn: () => apiFetch<Health>("/health"), refetchInterval: 15_000 });
+
+/** 실시간 엔진이 도는 시장 (ADR 0031). health를 받기 전에는 1단계 값(업비트)으로 본다. */
+export const useLiveMarkets = (): Set<string> => {
+  const key = (useHealth().data?.live_markets ?? ["upbit"]).join(",");
+  return useMemo(() => new Set(key.split(",").filter(Boolean)), [key]);
+};
 
 export const usePortfolio = () =>
   useQuery({ queryKey: ["portfolio"], queryFn: () => apiFetch<Portfolio>("/portfolio"), refetchInterval: 30_000 });
@@ -123,10 +129,11 @@ export const useQuote = (market: string, symbol: string, enabled = true) =>
     refetchInterval: 30_000,
   });
 
-export const useCandles = (market: string, symbol: string, tf: string, limit = 300) =>
+export const useCandles = (market: string, symbol: string, tf: string, limit = 300, enabled = true) =>
   useQuery({
     queryKey: ["candles", market, symbol, tf, limit],
     queryFn: () => apiFetch<ApiCandle[]>(`/candles/${market}/${encodeURIComponent(symbol)}${qs({ tf, limit })}`),
+    enabled,
   });
 
 export const useRiskEvents = (enabled: boolean) =>

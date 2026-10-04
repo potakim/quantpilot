@@ -28,6 +28,10 @@ export const strategyLabel = (name: string | null | undefined) =>
 
 export const marketLabel = (m: string | null | undefined) => (m ? (MARKET_LABEL[m] ?? m) : "—");
 
+/** 일정 항목의 출처: 전략이면 전략 이름, 아니면 시장(없으면 "공통"). 잡 ID를 화면에 내지 않는다 (ADR 0031). */
+export const scheduleSource = (name: string, market: string | null | undefined) =>
+  STRATEGY_LABEL[name] ?? (market ? (MARKET_LABEL[market] ?? market) : "공통");
+
 /** 거래 화면 AI 패널의 게이팅 결과. */
 export function gateLabel(gate: string | null | undefined): { text: string; tone: LabelTone } {
   if (gate === "full") return { text: "진입 허용 · 전체 사이징", tone: "ok" };

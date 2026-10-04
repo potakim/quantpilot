@@ -154,6 +154,17 @@ async def create_backtest(
     if req.source not in SOURCES:
         raise ApiError(400, "INVALID_PARAM", f"source는 {SOURCES} 중 하나")
     strat = create_checked(req.strategy, req.params)
+    from quantpilot.data.loader import DAILY_ONLY
+
+    if req.source in DAILY_ONLY and strat.timeframe not in (
+        "1d",
+        "1M",
+    ):  # 월간 전략도 일봉으로 돈다
+        raise ApiError(
+            400,
+            "INVALID_PARAM",
+            f"{req.source}는 일봉만 제공 — {req.strategy}({strat.timeframe})는 synthetic으로 돌린다",
+        )
     if req.unlock_holdout:
         async with deps.sessions() as s:
             used = await s.scalar(

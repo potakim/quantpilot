@@ -25,7 +25,7 @@ from quantpilot.api.errors import ApiError
 from quantpilot.api.routes.system import halted_map, link_of
 from quantpilot.backtest.costs import preset
 from quantpilot.core import clock
-from quantpilot.core.models import Market, Order, OrderType, Side
+from quantpilot.core.models import LIVE_MARKETS, Market, Order, OrderType, Side
 from quantpilot.execution.risk import RiskDecision, RiskManager, RiskRules
 from quantpilot.realtime import keys as hk
 
@@ -87,10 +87,15 @@ def _account_equity(acct: Any) -> float:
 async def portfolio(
     deps: DepsDep,
 ) -> dict[str, Any]:
-    """시장별 현금·평가액·포지션·오늘 손익, 월 손익, 월 한도, 할트."""
+    """시장별 현금·평가액·포지션·오늘 손익, 월 손익, 월 한도, 할트.
+
+    합계는 운영 중인 시장(active)만 센다: 실시간 엔진이 있거나(LIVE_MARKETS) 저장된 계좌 흔적(포지션·저장된
+    페이퍼 현금)이 있는 시장. 계좌가 없는 시장의 초기 현금이 총 자산에 섞이지 않게 한다 (ADR 0031).
+    """
     from quantpilot.db.repo import SqlConfigRepo, SqlOpsRepo
 
     ops = SqlOpsRepo(deps.sessions)
+    config = SqlConfigRepo(deps.sessions)
     now = deps.utcnow()
     by: dict[str, Any] = {}
     month_pnl: dict[str, float | None] = {}
@@ -98,23 +103,34 @@ async def portfolio(
         acct = await deps.account(m)
         eq = _account_equity(acct)
         since = metrics.day_start(now, m)
+        positions = acct.positions()
+        active = (
+            m in LIVE_MARKETS
+            or bool(positions)
+            or await config.get_setting(f"paper.cash.{m.value}") is not None
+        )
         by[m.value] = {
+            "active": active,
             "cash": float(acct.cash()),
             "equity": eq,
-            "positions": [queries_position(p) for p in acct.positions().values()],
+            "positions": [queries_position(p) for p in positions.values()],
             "today_pnl": metrics.today_pnl(eq, await ops.equity_snapshots_since(m, since)),
         }
         ms = await month_start(deps, m)
         month_pnl[m.value] = eq / float(ms["equity"]) - 1 if ms and ms.get("equity") else None
-    fx = await deps.hub.get("fx:usdkrw") or await SqlConfigRepo(deps.sessions).get_setting(
-        "fx.usdkrw"
-    )
-    krw = by["upbit"]["equity"] + by["krx"]["equity"]
-    total = krw + by["us"]["equity"] * float(fx) if fx else None
+    fx = await deps.hub.get("fx:usdkrw") or await config.get_setting("fx.usdkrw")
+
+    def eq_of(m: str) -> float:
+        return by[m]["equity"] if by[m]["active"] else 0.0
+
+    krw = eq_of("upbit") + eq_of("krx")
+    us_active = by["us"]["active"]
+    total = krw + eq_of("us") * float(fx) if fx else None
     return {
         "total_equity_krw": total if total is not None else krw,
         "today_pnl_krw": _today_pnl_krw(by, fx),
-        "total_includes_us": fx is not None,
+        # 합계가 운영 중인 시장을 모두 담았는가 (미국이 운영 중인데 환율이 없으면 False)
+        "total_includes_us": fx is not None or not us_active,
         "fx": {"usdkrw": fx, "source": "hub fx:usdkrw / settings fx.usdkrw" if fx else None},
         "by_market": by,
         "month_pnl": month_pnl,
@@ -124,9 +140,11 @@ async def portfolio(
 
 
 def _today_pnl_krw(by: dict[str, Any], fx: Any) -> float | None:
-    """시장별 오늘 손익 합(원). 미국은 환율이 있을 때만 더한다. 하나도 없으면 None."""
+    """운영 중인 시장의 오늘 손익 합(원). 미국은 환율이 있을 때만 더한다. 하나도 없으면 None."""
     parts = []
     for m, rate in (("upbit", 1.0), ("krx", 1.0), ("us", float(fx) if fx else None)):
+        if not by[m]["active"]:
+            continue
         t = by[m]["today_pnl"]
         if t is not None and rate is not None:
             parts.append(t["amount"] * rate)
@@ -306,6 +324,11 @@ async def create_order(
         raise ApiError(400, "INVALID_PARAM", "qty와 amount 중 정확히 하나")
     if req.type == OrderType.LIMIT and not req.limit_price:
         raise ApiError(400, "INVALID_PARAM", "지정가 주문은 limit_price 필요")
+    if Market(req.market) not in LIVE_MARKETS:
+        # 이 시장의 주문 큐를 읽는 엔진이 없다 — 받으면 영원히 대기로 남는다 (ADR 0031)
+        raise ApiError(
+            409, "MARKET_NOT_LIVE", f"{Market(req.market).value} 시장은 2단계에서 열린다"
+        )
     price = await price_of(deps, req.market, req.symbol)
     if price is None:
         raise ApiError(409, "NO_PRICE", f"시세 없음: {req.symbol}")

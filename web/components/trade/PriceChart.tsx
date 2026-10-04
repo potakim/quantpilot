@@ -4,7 +4,7 @@
 // 변동성 돌파 목표가 점선 --ai + 라벨, 진입 마커(초록 삼각), 현재가 라벨 --up. 시각 표시는 KST.
 import { useEffect, useRef } from "react";
 import type { IChartApi, IPriceLine, ISeriesApi, ISeriesMarkersPluginApi, Time, UTCTimestamp } from "lightweight-charts";
-import { applyTick, movingAverage, type Bar } from "@/lib/chart-data";
+import { applyTick, axisPrice, bucketStart, movingAverage, type Bar } from "@/lib/chart-data";
 import { kstTime } from "@/lib/format";
 
 const C = {
@@ -86,6 +86,8 @@ export function PriceChart({
         },
         localization: {
           locale: "ko-KR",
+          priceFormatter: axisPrice, // 151,000,000 — 원시 숫자(151000000.00) 대신
+
           timeFormatter: (t: Time) => {
             const p = kstParts(Number(t));
             return `${pad(p.mo)}-${pad(p.d)} ${pad(p.h)}:${pad(p.m)} KST`;
@@ -163,9 +165,10 @@ export function PriceChart({
   // 진입 마커
   useEffect(() => {
     void ready.current?.then(() => {
+      const anchor = data.current[0]?.time ?? 0; // API 봉과 같은 경계로 (일봉 시작이 UTC 자정이 아닐 수 있다)
       markers.current?.setMarkers(
         entries.map((e) => ({
-          time: (Math.floor(e.time / tfSeconds) * tfSeconds) as UTCTimestamp,
+          time: bucketStart(anchor, tfSeconds, e.time) as UTCTimestamp,
           position: "belowBar" as const,
           shape: "arrowUp" as const,
           color: C.ok,
@@ -173,7 +176,7 @@ export function PriceChart({
         })),
       );
     });
-  }, [entries, tfSeconds]);
+  }, [entries, tfSeconds, bars]);
 
   // 실시간 체결가 → 마지막 봉
   useEffect(() => {

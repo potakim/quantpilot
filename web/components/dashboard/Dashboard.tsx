@@ -13,8 +13,8 @@ import { Toggle } from "@/components/ui/Toggle";
 import { Badge, Card, CardSkeleton, EmptyNote, ErrorNote, Segmented, cx } from "@/components/ui/primitives";
 import { apiFetch, reasonText } from "@/lib/api";
 import { DASH, fmtKrw, fmtNumber, fmtQty, fmtUsd, kstDayStartIso, kstTime, shortSymbol, toneOf } from "@/lib/format";
-import { STRATEGY_TITLE, marketLabel, strategyLabel } from "@/lib/labels";
-import { curvePaths, scheduleRows, strategyMddText, strategyMonthText, todayPnlView } from "@/lib/metrics";
+import { STRATEGY_TITLE, marketLabel, scheduleSource, strategyLabel } from "@/lib/labels";
+import { cashKrw, curvePaths, scheduleRows, strategyMddText, strategyMonthText, todayPnlView } from "@/lib/metrics";
 import {
   useEquityCurve,
   useFills,
@@ -25,18 +25,11 @@ import {
   useSchedule,
   useStrategies,
 } from "@/lib/queries";
-import type { JudgmentRow, Portfolio, StrategyView } from "@/lib/types";
+import type { JudgmentRow, StrategyView } from "@/lib/types";
 import { useUi } from "@/lib/ui-store";
 import { useLive } from "@/lib/ws";
 
 const TONE_TEXT = { up: "text-up", down: "text-down", muted: "text-muted" } as const;
-
-function cashKrw(p: Portfolio): number {
-  const fx = p.fx.usdkrw ?? null;
-  let cash = (p.by_market.upbit?.cash ?? 0) + (p.by_market.krx?.cash ?? 0);
-  if (fx) cash += (p.by_market.us?.cash ?? 0) * fx;
-  return cash;
-}
 
 function positionText(s: StrategyView): string {
   const entries = Object.entries(s.status.position ?? {}).filter(([, q]) => q);
@@ -98,7 +91,7 @@ function KpiRow() {
         value={p ? fmtKrw(p.total_equity_krw) : DASH}
         sub={
           p
-            ? `현금 ${fmtKrw(cashKrw(p))}${!p.total_includes_us && (p.by_market.us?.equity ?? 0) > 0 ? " · 미국 제외 (환율 없음)" : ""}`
+            ? `현금 ${fmtKrw(cashKrw(p))}${!p.total_includes_us ? " · 미국 제외 (환율 없음)" : ""}`
             : "포트폴리오를 불러오지 못했습니다"
         }
       />
@@ -246,7 +239,7 @@ function ScheduleCard() {
                 <div className="flex flex-col gap-0.5">
                   <div className="text-[13px] font-medium">{s.what}</div>
                   <div className="text-xs text-muted">
-                    {strategyLabel(s.name)} · {done ? "완료" : next ? "다음" : "예정"}
+                    {scheduleSource(s.name, s.market)} · {done ? "완료" : next ? "다음" : "예정"}
                   </div>
                 </div>
               </li>

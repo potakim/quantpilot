@@ -2,6 +2,18 @@
 import { DASH, fmtKrw, fmtPct, fmtSignedKrw, fmtUsd, toneOf, type Tone } from "@/lib/format";
 import type { EquityPoint, Portfolio, ScheduleItem } from "@/lib/types";
 
+/** 운영 중인 시장(active)의 현금 합(원). 계좌가 없는 시장의 초기 현금은 빼고 센다 (ADR 0031). */
+export function cashKrw(p: Portfolio): number {
+  const fx = p.fx.usdkrw ?? null;
+  const of = (m: string) => {
+    const b = p.by_market[m];
+    return b && b.active !== false ? b.cash : 0;
+  };
+  let cash = of("upbit") + of("krx");
+  if (fx) cash += of("us") * fx;
+  return cash;
+}
+
 /** 대시보드 "오늘 손익" 카드: 값(부호 원화)·퍼센트·색. */
 export function todayPnlView(p: Portfolio | undefined | null): { value: string; pct: string; tone: Tone } {
   const amount = p?.today_pnl_krw;
@@ -33,6 +45,7 @@ export function feeRowText(rate: number | null | undefined, amount: number | nul
 export interface ScheduleRow {
   key: string;
   name: string;
+  market: string | null;
   at: string;
   what: string;
   done: boolean;
@@ -48,14 +61,26 @@ export function scheduleRows(
   for (const it of rest ?? []) {
     if (!it.next_action?.at) continue;
     const key = `${it.name}@${it.next_action.at}`;
-    rows.set(key, { key, name: it.name, at: it.next_action.at, what: it.next_action.what || DASH, done: it.done });
+    rows.set(key, {
+      key,
+      name: it.name,
+      market: it.market ?? null,
+      at: it.next_action.at,
+      what: it.next_action.what || DASH,
+      done: it.done,
+    });
   }
   for (const s of live) {
     const at = s.next_action?.at;
     if (!at) continue;
-    for (const [k, r] of rows) if (r.name === s.name) rows.delete(k);
+    let market: string | null = null;
+    for (const [k, r] of rows) {
+      if (r.name !== s.name) continue;
+      market = r.market;
+      rows.delete(k);
+    }
     const key = `${s.name}@${at}`;
-    rows.set(key, { key, name: s.name, at, what: s.next_action?.what || DASH, done: Date.parse(at) < now });
+    rows.set(key, { key, name: s.name, market, at, what: s.next_action?.what || DASH, done: Date.parse(at) < now });
   }
   return [...rows.values()].sort((a, b) => a.at.localeCompare(b.at));
 }

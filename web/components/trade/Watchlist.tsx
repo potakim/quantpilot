@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { cx } from "@/components/ui/primitives";
 import { DASH, fmtPct, fmtPrice, shortSymbol, toneOf } from "@/lib/format";
-import { strategyLabel } from "@/lib/labels";
+import { marketLabel, strategyLabel } from "@/lib/labels";
 import { useCandles, useQuote } from "@/lib/queries";
 import type { Orderbook, StrategyView } from "@/lib/types";
 import { useLive } from "@/lib/ws";
@@ -26,9 +26,9 @@ export function useLivePrice(market: string, symbol: string, fallback: number | 
   return { price: tick?.price ?? fallback ?? null, ts: tick?.ts ?? null };
 }
 
-/** 전일 종가 (일봉 2개 중 앞의 것). */
-export function usePrevClose(market: string, symbol: string): number | null {
-  const d = useCandles(market, symbol, "1d", 2);
+/** 전일 종가 (일봉 2개 중 앞의 것). enabled=false면 요청하지 않는다. */
+export function usePrevClose(market: string, symbol: string, enabled = true): number | null {
+  const d = useCandles(market, symbol, "1d", 2, enabled);
   const rows = d.data ?? [];
   return rows.length >= 2 ? rows[rows.length - 2]!.c : null;
 }
@@ -82,25 +82,64 @@ function WatchRow({
   );
 }
 
+/** 실시간 엔진이 없는 시장의 행: 시세를 요청하지 않고 "2단계 예정"으로 보인다 (ADR 0031). */
+function PendingRow({ market, symbol, strategy, active }: { market: string; symbol: string; strategy: string; active: boolean }) {
+  return (
+    <li>
+      <Link
+        href={`/trade/${market}/${encodeURIComponent(symbol)}`}
+        aria-current={active ? "page" : undefined}
+        className={cx(
+          "flex items-center justify-between border-b border-bg3 px-3.5 py-2.5 text-ink no-underline hover:bg-bg3 hover:text-ink",
+          active && "bg-bg3",
+        )}
+      >
+        <span className="flex flex-col gap-px">
+          <span className="text-[13px] font-semibold">{displaySymbol(market, symbol)}</span>
+          <span className="text-[11px] text-muted">
+            {strategyLabel(strategy)} · {marketLabel(market)} 2단계 예정
+          </span>
+        </span>
+        <span className="num text-[13px] text-muted">{DASH}</span>
+      </Link>
+    </li>
+  );
+}
+
+/** 관심 종목 목록: 전략 대상 종목을 시장 탭으로 거르고, 실시간 시장을 앞에 둔다. */
+export function watchItems(
+  strategies: StrategyView[],
+  tab: string,
+  live: Set<string>,
+): { market: string; symbol: string; strategy: string }[] {
+  const seen = new Set<string>();
+  return strategies
+    .flatMap((s) => s.symbols.map((sym) => ({ market: s.market, symbol: sym, strategy: s.name })))
+    .filter((i) => {
+      const k = `${i.market}:${i.symbol}`;
+      if (seen.has(k) || (tab !== "all" && i.market !== tab)) return false;
+      seen.add(k);
+      return true;
+    })
+    .sort((a, b) => Number(live.has(b.market)) - Number(live.has(a.market)));
+}
+
 export function Watchlist({
   strategies,
   market,
   symbol,
   heldSymbols,
+  tab,
+  live,
 }: {
   strategies: StrategyView[];
   market: string;
   symbol: string;
   heldSymbols: Set<string>;
+  tab: string;
+  live: Set<string>;
 }) {
-  const items = strategies.flatMap((s) => s.symbols.map((sym) => ({ market: s.market, symbol: sym, strategy: s.name })));
-  const seen = new Set<string>();
-  const unique = items.filter((i) => {
-    const k = `${i.market}:${i.symbol}`;
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
+  const unique = watchItems(strategies, tab, live);
   return (
     <section aria-labelledby="watch-title" className="flex flex-col overflow-hidden rounded-card border border-line bg-bg2">
       <div className="flex items-center justify-between border-b border-line px-3.5 py-3">
@@ -110,16 +149,27 @@ export function Watchlist({
         <span className="text-[11px] text-muted">전략 대상 {unique.length}</span>
       </div>
       <ul className="max-h-[420px] overflow-y-auto">
-        {unique.map((i) => (
-          <WatchRow
-            key={`${i.market}:${i.symbol}`}
-            market={i.market}
-            symbol={i.symbol}
-            strategy={i.strategy}
-            active={i.market === market && i.symbol === symbol}
-            held={heldSymbols.has(`${i.market}:${i.symbol}`)}
-          />
-        ))}
+        {unique.map((i) =>
+          live.has(i.market) ? (
+            <WatchRow
+              key={`${i.market}:${i.symbol}`}
+              market={i.market}
+              symbol={i.symbol}
+              strategy={i.strategy}
+              active={i.market === market && i.symbol === symbol}
+              held={heldSymbols.has(`${i.market}:${i.symbol}`)}
+            />
+          ) : (
+            <PendingRow
+              key={`${i.market}:${i.symbol}`}
+              market={i.market}
+              symbol={i.symbol}
+              strategy={i.strategy}
+              active={i.market === market && i.symbol === symbol}
+            />
+          ),
+        )}
+        {!unique.length ? <li className="px-3.5 py-3 text-xs text-muted">이 시장의 전략 대상 종목이 없습니다</li> : null}
       </ul>
     </section>
   );

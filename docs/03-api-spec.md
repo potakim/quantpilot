@@ -16,7 +16,7 @@ FastAPI, base `/api/v1`. 인증은 `Authorization: Bearer <JWT>` (단일 사용�
 | 401 | `UNAUTHORIZED` | 토큰 없음·만료 |
 | 403 | `CONFIRMATION_REQUIRED` | 실전 전환·키 변경에 2차 확인 필요 |
 | 404 | `NOT_FOUND` | 전략·주문 없음 |
-| 409 | `NO_PRICE` / `HALTED` / `GATE_LOCKED` | 시세 없음 / 할트 중 / 관문 미통과 |
+| 409 | `NO_PRICE` / `HALTED` / `GATE_LOCKED` / `MARKET_NOT_LIVE` | 시세 없음 / 할트 중 / 관문 미통과 / 실시간 엔진이 없는 시장 (ADR 0031) |
 | 422 | `RISK_REJECTED` | RiskManager 거부 (detail에 RiskDecision) |
 | 502 | `BROKER_ERROR` / `DATA_ERROR` / `JUDGE_ERROR` | 외부 API 실패 |
 
@@ -30,7 +30,7 @@ FastAPI, base `/api/v1`. 인증은 `Authorization: Bearer <JWT>` (단일 사용�
 
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
-| GET | `/health` | `{ok, version, paper, env, engine_alive, ws_connected:{upbit,kis}, halted:{upbit,krx,us}}` |
+| GET | `/health` | `{ok, version, paper, env, engine_alive, ws_connected:{upbit,kis}, halted:{upbit,krx,us}, live_markets:["upbit"]}` — `live_markets`는 실시간 엔진이 도는 시장 (ADR 0031) |
 | POST | `/auth/login` | `{password}` → `{token, expires_at}` |
 | GET | `/settings` | settings 테이블 전체 + RiskRules(읽기 전용, `locked:true`) |
 | PATCH | `/settings` | `{key: value, ...}` — 허용 키만: `gate.*`, `judge.provider`, `llm.models`, `news.enabled`, `notify.*` |
@@ -61,13 +61,13 @@ FastAPI, base `/api/v1`. 인증은 `Authorization: Bearer <JWT>` (단일 사용�
 
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
-| GET | `/portfolio` | `{total_equity_krw, today_pnl_krw, by_market:{upbit:{cash,equity,positions:[...], today_pnl:{amount,pct}\|null}, krx:..., us:...}, month_pnl, month_limit, halted:{...}}` (USD는 환율 환산, 환율 출처 명시). `today_pnl` = 현재 평가액 − 시장 현지 자정 이후 첫 `equity_snapshots` 값, 오늘 스냅샷이 없으면 null. `today_pnl_krw`는 값이 있는 시장의 합(미국은 환율이 있을 때만), 하나도 없으면 null (ADR 0020) |
+| GET | `/portfolio` | `{total_equity_krw, today_pnl_krw, by_market:{upbit:{active,cash,equity,positions:[...], today_pnl:{amount,pct}\|null}, krx:..., us:...}, month_pnl, month_limit, halted:{...}}` (USD는 환율 환산, 환율 출처 명시). `today_pnl` = 현재 평가액 − 시장 현지 자정 이후 첫 `equity_snapshots` 값, 오늘 스냅샷이 없으면 null. `today_pnl_krw`는 값이 있는 시장의 합(미국은 환율이 있을 때만), 하나도 없으면 null (ADR 0020). 합계·오늘 손익은 `active` 시장만 센다 — 실시간 엔진이 있거나 저장된 계좌(포지션·페이퍼 현금)가 있는 시장 (ADR 0031) |
 | GET | `/portfolio/equity?market=upbit&days=30` | 자산 곡선 `{market, days, points:[{ts,v}], benchmark:[{ts,v}]\|null, source:"equity_snapshots"}`. days ∈ {30, 90, 365}(그 밖은 400 `INVALID_PARAM`). 30일은 1시간당, 90·365일은 하루당 마지막 값 1개. benchmark는 같은 시작 자본으로 BTC(KRW-BTC)를 들고만 있었을 때(업비트만, 봉이 없으면 null). 스냅샷이 없으면 `points: []` |
-| GET | `/schedule` | 오늘(KST) 예약 작업 `[{name, market, next_action:{at, what}, done}]` — scheduler 잡 표(JOBS)의 cron에서 계산한 오늘 실행 시각(UTC ISO), 이미 지난 것은 `done:true`. 변동성 돌파는 1분봉으로 계산한 오늘 목표가를 함께 싣는다(봉이 없으면 "목표가 계산 불가"). 읽기 전용 (ADR 0020) |
+| GET | `/schedule` | 오늘(KST) 예약 작업 `[{name, title, market, next_action:{at, what}, done}]` — scheduler 잡 표(JOBS)의 cron에서 계산한 오늘 실행 시각(UTC ISO), 이미 지난 것은 `done:true`. 변동성 돌파는 1분봉으로 계산한 오늘 목표가를 함께 싣는다(봉이 없으면 "목표가 계산 불가"). 읽기 전용 (ADR 0020). 실시간 엔진이 없는 시장의 잡과 연결되지 않은 잡은 싣지 않는다 (ADR 0031) |
 | GET | `/positions?market=` | 포지션 목록 + 전략·손절가·미실현 |
 | GET | `/orders?market=&status=&limit=` | 주문 목록 |
 | GET | `/fills?market=&strategy=&from=&to=` | 원장 |
-| POST | `/orders` | 수동 주문 `{market, symbol, side, qty|amount, type, limit_price?, stop?}` → RiskManager 통과 시 201 `{order(status=queued), risk}`, 거부 시 422(할트 중 409 `HALTED`). **수동 주문도 리스크 게이트를 탄다** — api는 사전 검사 후 주문 큐에 넣고 엔진이 OrderExecutor로 다시 검사·실행한다 (ADR 0017) |
+| POST | `/orders` | 수동 주문 `{market, symbol, side, qty|amount, type, limit_price?, stop?}` → RiskManager 통과 시 201 `{order(status=queued), risk}`, 거부 시 422(할트 중 409 `HALTED`, 실시간 엔진이 없는 시장은 409 `MARKET_NOT_LIVE` — ADR 0031). **수동 주문도 리스크 게이트를 탄다** — api는 사전 검사 후 주문 큐에 넣고 엔진이 OrderExecutor로 다시 검사·실행한다 (ADR 0017) |
 | DELETE | `/orders/{id}` | 미체결 취소 |
 | POST | `/positions/{market}/{symbol}/close` | 시장가 청산 (리스크 게이트의 exit 경로) |
 | GET | `/quotes/{market}/{symbol}` | 현재가·호가 5단계·전략 상태(목표가, 이평 스코어) + 비용 `fee_rate`(편도 수수료율)·`tax_rate_sell`(매도 세율) — 백테스터·PaperBroker와 같은 CostModel 프리셋 (ADR 0020) |

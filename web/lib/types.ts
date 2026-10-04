@@ -10,6 +10,8 @@ export interface Health {
   engine_alive: boolean;
   ws_connected: { upbit: boolean; kis: boolean };
   halted: Record<string, string | null>;
+  /** 실시간 엔진이 도는 시장 (ADR 0031). 나머지는 "2단계 예정" */
+  live_markets?: string[];
   error?: string;
 }
 
@@ -35,7 +37,11 @@ export interface Portfolio {
   today_pnl_krw: number | null;
   total_includes_us: boolean;
   fx: { usdkrw: number | null; source: string | null };
-  by_market: Record<string, { cash: number; equity: number; positions: PositionView[]; today_pnl: TodayPnl | null }>;
+  /** active=false: 실시간 엔진도 저장된 계좌도 없는 시장 — 합계에서 빠진다 (ADR 0031) */
+  by_market: Record<
+    string,
+    { active?: boolean; cash: number; equity: number; positions: PositionView[]; today_pnl: TodayPnl | null }
+  >;
   month_pnl: Record<string, number | null>;
   month_limit: number;
   halted: Record<string, string | null>;
@@ -189,6 +195,8 @@ export interface EquityCurve {
 /** GET /schedule 항목 (ADR 0020 §4). */
 export interface ScheduleItem {
   name: string;
+  /** 잡 이름의 한국어 문구 (ADR 0031) */
+  title?: string;
   market: string | null;
   next_action: { at: string; what: string };
   done: boolean;

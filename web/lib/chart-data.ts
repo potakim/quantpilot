@@ -49,12 +49,25 @@ export function movingAverage(bars: Bar[], n: number): { time: number; value: nu
   return out;
 }
 
+/** ts가 속한 봉의 시작 시각. 기준 봉(anchor)의 시작 시각에서 봉 간격을 이어 붙인다 —
+ * 일봉의 시작이 UTC 자정이 아니어도(업비트 09:00 KST·현지 자정) API 봉과 같은 경계로 끊는다 (ADR 0031). */
+export function bucketStart(anchor: number, tfSeconds: number, tsSec: number): number {
+  return anchor + Math.floor((tsSec - anchor) / tfSeconds) * tfSeconds;
+}
+
+/** 차트 가격축 표시: 1,000 이상은 정수 + 천 단위 쉼표, 그 아래는 유효 자릿수를 남긴다. */
+export function axisPrice(p: number): string {
+  const a = Math.abs(p);
+  const digits = a >= 1000 ? 0 : a >= 100 ? 1 : a >= 1 ? 2 : 4;
+  return p.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
 /** 실시간 체결가 1건을 마지막 봉에 반영한 봉 (새 봉이면 새로 만든다). 과거 틱이면 null. */
 export function applyTick(bars: Bar[], tfSeconds: number, tsSec: number, price: number): Bar | null {
   const last = bars[bars.length - 1];
   if (!last) return null;
-  const start = Math.floor(tsSec / tfSeconds) * tfSeconds;
-  if (start < last.time) return null;
+  if (tsSec < last.time) return null;
+  const start = bucketStart(last.time, tfSeconds, tsSec);
   if (start === last.time) {
     return {
       ...last,

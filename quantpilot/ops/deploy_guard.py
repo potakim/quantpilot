@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, time
 
 from quantpilot.core.clock import TIMEZONES
-from quantpilot.core.models import Market
+from quantpilot.core.models import LIVE_MARKETS, Market
 
 # KRX 보유분이 있을 수 있는 시간대 (docs/07 §2) — KRX 실시간 엔진이 있을 때만 막는다 (ADR 0029)
 BLACKOUT_KST = (time(9, 5), time(15, 15))
@@ -23,8 +23,8 @@ BLACKOUT_KST = (time(9, 5), time(15, 15))
 UPBIT_EXIT_KST = (time(8, 55), time(9, 5))
 # 시간 청산 직후라 업비트 포지션이 가장 적은 시각
 RECOMMENDED_KST = (time(9, 10), time(10, 0))
-# 실시간 엔진이 도는 시장 (1단계: 업비트만)
-LIVE: frozenset[Market] = frozenset({Market.UPBIT})
+# 실시간 엔진이 도는 시장 (ADR 0031 — core.models.LIVE_MARKETS 한 곳에서 정한다)
+LIVE: frozenset[Market] = LIVE_MARKETS
 # 재시작해도 포지션·손절선·처리 표시를 복원하는 시장 (ADR 0028) — 열린 포지션은 알림만
 RESTART_SAFE: frozenset[Market] = frozenset({Market.UPBIT})
 

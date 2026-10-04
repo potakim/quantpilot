@@ -521,11 +521,54 @@ async def test_portfolio_and_positions(ctx):
     up = body["by_market"]["upbit"]
     assert up["positions"][0]["symbol"] == SYM
     assert body["month_limit"] == -0.05 and body["halted"]["upbit"] is None
-    assert body["total_includes_us"] is False
+    # 계좌가 없는 KRX·미국은 운영 중이 아니다 — 초기 현금이 총 자산에 섞이지 않는다 (ADR 0031)
+    assert up["active"] is True
+    assert (
+        body["by_market"]["krx"]["active"] is False and body["by_market"]["us"]["active"] is False
+    )
+    assert body["total_equity_krw"] == pytest.approx(up["equity"])
+    assert body["total_includes_us"] is True  # 운영 중인 시장은 모두 합계에 들어 있다
     r = await ctx.client.get(f"{API}/positions?market=upbit", headers=ctx.h)
     p = r.json()[0]
     assert p["strategy"] == "vol_breakout" and p["stop"] == 48_000_000
     assert p["price"] == 60_000_000 and p["unrealized"] == pytest.approx(200_000)
+
+
+async def test_market_scope_follows_live_markets(ctx):
+    """ADR 0031: 엔진 없는 시장은 주문 거부·health에 표시, 저장된 계좌가 생기면 합계에 들어간다."""
+    health = (await ctx.client.get(f"{API}/health")).json()
+    assert health["live_markets"] == ["upbit"]
+
+    krx = Market.KRX
+    await ctx.hub.set(hk.px(krx, "360750"), 15_000)  # 시세가 있어도
+    body = {"market": "krx", "symbol": "360750", "side": "buy", "amount": 1_000_000}
+    r = await ctx.client.post(f"{API}/orders", json=body, headers=ctx.h)
+    assert r.status_code == 409 and r.json()["error"]["code"] == "MARKET_NOT_LIVE"
+    assert await ctx.hub.pop(hk.orders_queue(krx)) is None  # 아무도 읽지 않는 큐에 넣지 않는다
+
+    up_only = (await ctx.client.get(f"{API}/portfolio", headers=ctx.h)).json()
+    await SqlConfigRepo(ctx.sessions).set_setting("paper.cash.krx", 3_000_000)
+    both = (await ctx.client.get(f"{API}/portfolio", headers=ctx.h)).json()
+    assert both["by_market"]["krx"]["active"] is True
+    assert both["total_equity_krw"] == pytest.approx(up_only["total_equity_krw"] + 3_000_000)
+
+
+async def test_backtest_rejects_intraday_strategy_on_daily_only_source(ctx):
+    """yfinance는 일봉만 준다 — ORB(5분봉)를 돌리면 조용히 매매 0건이 되던 것을 400으로 (ADR 0031)."""
+    req = {"strategy": "orb", "source": "yfinance"}
+    r = await ctx.client.post(f"{API}/backtests", json=req, headers=ctx.h)
+    assert r.status_code == 400 and r.json()["error"]["code"] == "INVALID_PARAM"
+    ok = await ctx.client.post(
+        f"{API}/backtests", json={"strategy": "orb", "source": "synthetic"}, headers=ctx.h
+    )
+    assert ok.status_code == 202
+
+
+def test_daily_only_loader_refuses_intraday_timeframe():
+    from quantpilot.data.loader import load
+
+    with pytest.raises(ValueError, match="일봉"):
+        load("yfinance", "QQQ", "5m")
 
 
 @pytest.mark.invariant

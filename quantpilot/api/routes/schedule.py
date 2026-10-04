@@ -16,7 +16,7 @@ from quantpilot.api import metrics, queries
 from quantpilot.api.auth import require_user
 from quantpilot.api.deps import DepsDep
 from quantpilot.core import clock
-from quantpilot.core.models import Market
+from quantpilot.core.models import LIVE_MARKETS, Market
 
 log = logging.getLogger(__name__)
 
@@ -31,10 +31,10 @@ JOB_LABELS: dict[str, tuple[Market | None, str]] = {
     "gem_rebalance": (Market.US, "GEM 월말 리밸런싱 확인"),
     "kis_token_refresh": (Market.KRX, "한국투자증권 토큰 재발급"),
     "upbit_prescreen": (Market.UPBIT, "뉴스 위험 사전 심사"),
-    "morning_brief": (None, "AI 아침 브리핑"),
     "daily_review": (None, "오늘 매매 사후 리뷰"),
     "month_roll": (None, "월초 평가액 저장"),
 }
+# morning_brief는 scheduler 훅이 연결되지 않아 싣지 않는다 — 연결하면 여기 추가 (ADR 0031)
 
 
 def _won(v: float) -> str:
@@ -59,6 +59,7 @@ async def _breakout_item(deps: Any, now_utc: Any) -> dict[str, Any]:
         at = clock.to_utc(anchor + timedelta(days=1), Market.UPBIT)
     return {
         "name": strat.name,
+        "title": "변동성 돌파 목표가",
         "market": Market.UPBIT.value,
         "next_action": {"at": queries.iso(at), "what": what},
         "done": False,
@@ -82,6 +83,8 @@ async def schedule(deps: DepsDep) -> list[dict[str, Any]]:
         if spec.trigger != "cron" or spec.name not in JOB_LABELS:
             continue
         market, what = JOB_LABELS[spec.name]
+        if market is not None and market not in LIVE_MARKETS:
+            continue  # 실시간 엔진이 없는 시장의 잡은 돌지 않는다 (ADR 0031)
         for at in metrics.cron_fires(spec.fields, start, end):
             if market in (Market.KRX, Market.US):
                 local = clock.to_local(at, market)
@@ -90,6 +93,7 @@ async def schedule(deps: DepsDep) -> list[dict[str, Any]]:
             items.append(
                 {
                     "name": spec.name,
+                    "title": what,
                     "market": market.value if market else None,
                     "next_action": {"at": queries.iso(at), "what": what},
                     "done": at <= now_utc,

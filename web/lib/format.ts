@@ -106,6 +106,14 @@ export function kstTime(iso: string | Date | null | undefined): string {
   return `${pad(k.getUTCHours())}:${pad(k.getUTCMinutes())}`;
 }
 
+/** UTC ISO → KST M/D (차트 날짜 눈금). */
+export function kstMonthDay(iso: string | Date | null | undefined): string {
+  const d = parse(iso);
+  if (!d) return DASH;
+  const k = kst(d);
+  return `${k.getUTCMonth() + 1}/${k.getUTCDate()}`;
+}
+
 function kstDayKey(d: Date): number {
   return Math.floor((d.getTime() + KST_OFFSET_MS) / 86_400_000);
 }

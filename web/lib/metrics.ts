@@ -1,5 +1,5 @@
 // 화면 지표 뷰모델 (ADR 0020). API 값 → 화면 문자열. 값이 없으면 "—"(DASH)를 낸다 — 화면은 이 함수만 쓴다.
-import { DASH, fmtKrw, fmtPct, fmtSignedKrw, fmtUsd, toneOf, type Tone } from "@/lib/format";
+import { DASH, fmtKrw, fmtPct, fmtSignedKrw, fmtUsd, kstMonthDay, toneOf, type Tone } from "@/lib/format";
 import type { EquityPoint, Portfolio, ScheduleItem } from "@/lib/types";
 
 /** 운영 중인 시장(active)의 현금 합(원). 계좌가 없는 시장의 초기 현금은 빼고 센다 (ADR 0031). */
@@ -85,13 +85,35 @@ export function scheduleRows(
   return [...rows.values()].sort((a, b) => a.at.localeCompare(b.at));
 }
 
+/** 일정 문구가 " · "로 여러 건 이어지면 앞 keep건 + "외 n건" (업비트 5종목 목표가가 다섯 줄로 늘어지던 것). KRW- 접두어는 뗀다. */
+export function shortWhat(what: string, keep = 1): { text: string; full: string } {
+  const full = what.replace(/KRW-([A-Z0-9]+)/g, "$1");
+  const parts = full.split(" · ");
+  if (parts.length <= keep + 1) return { text: full, full };
+  return { text: `${parts.slice(0, keep).join(" · ")} 외 ${parts.length - keep}건`, full };
+}
+
+export interface CurvePaths {
+  main: string;
+  bench: string | null;
+  min: number;
+  max: number;
+  end: { x: number; y: number }; // 전략 마지막 점 (viewBox 좌표)
+  benchEnd: { x: number; y: number } | null;
+  ret: number | null; // 첫 점 대비 마지막 점 수익률
+  benchRet: number | null;
+  xTicks: { x: number; label: string }[]; // 날짜 눈금 4개 (KST M/D, 같은 날은 하나)
+}
+
+const lastRet = (ps: EquityPoint[]) => (ps.length >= 2 && ps[0]!.v > 0 ? ps[ps.length - 1]!.v / ps[0]!.v - 1 : null);
+
 /** 자산 곡선을 SVG polyline 좌표로 (가로는 시각, 세로는 두 선 공통 범위). 점이 2개 미만이면 null. */
 export function curvePaths(
   points: EquityPoint[],
   bench: EquityPoint[] | null | undefined,
   width: number,
   height: number,
-): { main: string; bench: string | null; min: number; max: number } | null {
+): CurvePaths | null {
   if (points.length < 2) return null;
   const all = [...points, ...(bench ?? [])];
   const ts = all.map((p) => Date.parse(p.ts));
@@ -103,5 +125,23 @@ export function curvePaths(
   const x = (t: string) => (t1 === t0 ? 0 : ((Date.parse(t) - t0) / (t1 - t0)) * width);
   const y = (v: number) => (max === min ? height / 2 : height - ((v - min) / (max - min)) * height);
   const path = (ps: EquityPoint[]) => ps.map((p) => `${x(p.ts).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
-  return { main: path(points), bench: bench && bench.length >= 2 ? path(bench) : null, min, max };
+  const b = bench && bench.length >= 2 ? bench : null;
+  const endOf = (ps: EquityPoint[]) => ({ x: x(ps[ps.length - 1]!.ts), y: y(ps[ps.length - 1]!.v) });
+  const xTicks: { x: number; label: string }[] = [];
+  for (let i = 0; i <= 3; i++) {
+    const t = t0 + ((t1 - t0) * i) / 3;
+    const label = kstMonthDay(new Date(t));
+    if (!xTicks.some((k) => k.label === label)) xTicks.push({ x: (i / 3) * width, label });
+  }
+  return {
+    main: path(points),
+    bench: b ? path(b) : null,
+    min,
+    max,
+    end: endOf(points),
+    benchEnd: b ? endOf(b) : null,
+    ret: lastRet(points),
+    benchRet: b ? lastRet(b) : null,
+    xTicks,
+  };
 }

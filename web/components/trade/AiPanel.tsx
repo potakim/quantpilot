@@ -3,15 +3,26 @@
 // AI 판단 패널 (Trade.dc.html 우측 위, --ai-line 테두리): 확신도·게이팅 결과·원자 질문 바·LLM 2모델·리스크 게이트.
 // 판단 모델은 확률·확신도만 준다 (불변식 #7). 리스크 게이트 값은 GET /settings의 코드 상수(locked) 그대로.
 import { IconSparkle } from "@/components/ui/Icons";
-import { EmptyNote, cx } from "@/components/ui/primitives";
+import { CardSkeleton, EmptyNote, cx } from "@/components/ui/primitives";
 import { fmtNumber, fmtPct, kstTime, shortSymbol } from "@/lib/format";
-import { answerRows, gateLabel, verdictLabel } from "@/lib/labels";
+import { answerRows, gateLabel, modelName, verdictLabel } from "@/lib/labels";
 import type { JudgmentRow, RiskRulesView } from "@/lib/types";
 
 const BAR = { ai: "bg-ai", ok: "bg-ok", warn: "bg-warn", muted: "bg-muted", up: "bg-up" } as const;
 const TXT = { ok: "text-ok-ink", warn: "text-warn", muted: "text-muted", ai: "text-ai-ink", up: "text-up" } as const;
 
-export function AiPanel({ symbol, judgment, rules }: { symbol: string; judgment: JudgmentRow | null; rules: RiskRulesView | null }) {
+export function AiPanel({
+  symbol,
+  judgment,
+  rules,
+  loading = false,
+}: {
+  symbol: string;
+  judgment: JudgmentRow | null;
+  rules: RiskRulesView | null;
+  /** 판단을 아직 불러오는 중 — "기록 없음"을 먼저 띄우지 않는다 */
+  loading?: boolean;
+}) {
   const g = gateLabel(judgment?.gate);
   const rows = answerRows(judgment?.answers);
   const verdicts = judgment?.verdicts ?? [];
@@ -29,7 +40,9 @@ export function AiPanel({ symbol, judgment, rules }: { symbol: string; judgment:
           </span>
         ) : null}
       </div>
-      {!judgment ? (
+      {!judgment && loading ? (
+        <CardSkeleton lines={4} className="border-0 p-0" />
+      ) : !judgment ? (
         <EmptyNote>이 종목의 판단 기록이 아직 없습니다. 전략 신호가 나면 판단 모델이 호출됩니다.</EmptyNote>
       ) : (
         <>
@@ -63,7 +76,9 @@ export function AiPanel({ symbol, judgment, rules }: { symbol: string; judgment:
                 return (
                   <li key={v.id ?? i} className="flex flex-col gap-1 rounded-block bg-bg3 px-3 py-2.5">
                     <div className="flex justify-between text-xs">
-                      <span className="font-semibold">{v.model}</span>
+                      <span className="font-semibold" title={v.model}>
+                        {modelName(v.model)}
+                      </span>
                       <span className={cx("font-semibold", l.approve ? "text-ok-ink" : "text-warn")}>{l.text}</span>
                     </div>
                     {v.reason ? <p className="text-xs leading-normal text-ink2">{v.reason}</p> : null}

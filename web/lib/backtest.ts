@@ -119,8 +119,13 @@ export function kpis(run: BacktestRun, market: string, compare?: BacktestRun | n
 
 export const CHART = { w: 840, h: 300, left: 40, right: 820, top: 30, bottom: 280 } as const;
 export const DD = { w: 840, h: 86, left: 40, right: 820, top: 6, bottom: 76 } as const;
+// 640px 미만 화면용 틀: 같은 글자 크기가 폭 840 틀보다 두 배쯤 크게 보인다 (모바일에서 눈금이 4px로 줄던 것)
+export const CHART_SM = { w: 420, h: 280, left: 34, right: 410, top: 26, bottom: 260 } as const;
+export const DD_SM = { w: 420, h: 72, left: 34, right: 410, top: 6, bottom: 62 } as const;
 
-interface Frame {
+export interface Frame {
+  w: number;
+  h: number;
   left: number;
   right: number;
   top: number;

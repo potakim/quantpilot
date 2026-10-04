@@ -6,7 +6,7 @@ import { useId, useRef, useState } from "react";
 import { cx } from "@/components/ui/primitives";
 import { apiFetch, reasonText } from "@/lib/api";
 import { DASH, fmtKrw, fmtPrice, fmtQty, fmtSignedKrw, fmtUsd, kstTime, shortSymbol, toneOf } from "@/lib/format";
-import { strategyLabel } from "@/lib/labels";
+import { orderStatusLabel, strategyLabel } from "@/lib/labels";
 import type { FillRow, OrderRow, PositionView } from "@/lib/types";
 
 const TONE = { up: "text-up", down: "text-down", muted: "text-muted" } as const;
@@ -31,11 +31,14 @@ export function TradeTabs({
   fills,
   orders,
   positions,
+  loading,
 }: {
   market: string;
   fills: FillRow[];
   orders: OrderRow[];
   positions: PositionView[];
+  /** 탭별로 아직 불러오는 중인지 — 그동안 "없습니다"와 개수 0을 띄우지 않는다 */
+  loading?: Partial<Record<Tab, boolean>>;
 }) {
   const [tab, setTab] = useState<Tab>("fills");
   const id = useId();
@@ -83,7 +86,7 @@ export function TradeTabs({
               tab === t.key ? "border-ai font-semibold text-ink" : "border-transparent text-muted",
             )}
           >
-            {t.label} <span className="num">{t.n}</span>
+            {t.label} <span className="num">{loading?.[t.key] ? "" : t.n}</span>
           </button>
         ))}
       </div>
@@ -112,7 +115,7 @@ export function TradeTabs({
                     <Td className={f.side === "buy" ? "text-up" : "text-down"}>{f.side === "buy" ? "매수" : "매도"}</Td>
                     <Td className="num">{fmtPrice(f.price, f.market)}</Td>
                     <Td className="num">{money(f.price * f.qty)}</Td>
-                    <Td className="text-muted">{f.reason || DASH}</Td>
+                    <Td className="text-muted">{f.reason === "manual" ? "수동 주문" : f.reason || DASH}</Td>
                   </tr>
                 ))}
               </tbody>
@@ -140,7 +143,7 @@ export function TradeTabs({
                     <Td className="num">{fmtQty(o.qty, o.market)}</Td>
                     <Td className="num">{o.limit_price == null ? "시장가" : fmtPrice(o.limit_price, o.market)}</Td>
                     <Td>
-                      <span className="mr-2 text-muted">{o.status}</span>
+                      <span className="mr-2 text-muted">{orderStatusLabel(o.status)}</span>
                       <button
                         type="button"
                         onClick={() => cancel.mutate(o.id)}
@@ -185,7 +188,9 @@ export function TradeTabs({
             </>
           )}
         </table>
-        {(tab === "fills" && !todayFills.length) || (tab === "orders" && !openOrders.length) || (tab === "positions" && !positions.length) ? (
+        {loading?.[tab] ? (
+          <div className="skeleton mx-[18px] my-3 h-4 w-1/2" aria-hidden="true" />
+        ) : (tab === "fills" && !todayFills.length) || (tab === "orders" && !openOrders.length) || (tab === "positions" && !positions.length) ? (
           <p className="px-[18px] py-3 text-xs text-muted">
             {tab === "fills" ? "오늘 체결이 없습니다" : tab === "orders" ? "미체결 주문이 없습니다" : "보유 포지션이 없습니다"}
           </p>

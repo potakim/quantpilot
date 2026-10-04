@@ -7,7 +7,7 @@ import { useRef } from "react";
 import { Badge, CardSkeleton, EmptyNote, ErrorNote, cx } from "@/components/ui/primitives";
 import { apiFetch, reasonText } from "@/lib/api";
 import { fmtNumber, fmtUsd, kstRelTime, shortSymbol } from "@/lib/format";
-import { answerRows, gateLabel, judgmentResult, strategyLabel, verdictLabel } from "@/lib/labels";
+import { answerRows, gateLabel, gateZone, judgmentResult, strategyLabel, verdictLabel } from "@/lib/labels";
 import { useJudgment } from "@/lib/queries";
 
 export function JudgmentDetailPanel({ id }: { id: number | null }) {
@@ -60,7 +60,7 @@ export function JudgmentDetailPanel({ id }: { id: number | null }) {
             ))}
           </ul>
           <div className="flex justify-between rounded-block bg-ai-bg px-3 py-2.5 text-xs">
-            <span className="text-ai-ink">confidence {fmtNumber(d.confidence, 2)} → 게이트 {d.gate}</span>
+            <span className="text-ai-ink">confidence {fmtNumber(d.confidence, 2)} → {gateZone(d.gate)}</span>
             <span className="font-semibold">{gateLabel(d.gate).text}</span>
           </div>
           <div className="text-xs text-muted">LLM 합의</div>

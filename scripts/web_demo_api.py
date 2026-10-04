@@ -117,6 +117,23 @@ def _bars(symbol: str, start_local: datetime) -> list[BarClosed]:
     ]
 
 
+def _btc_history(before_local: datetime) -> list[BarClosed]:
+    """1분봉 이틀치 앞 35일, 매시 정각 1분봉 하나 — 자산 곡선의 BTC 보유 비교선이 그려지게 (데모 전용).
+
+    벤치마크는 첫 스냅샷 시각의 직전 종가가 있어야 그린다(api.metrics.benchmark). 스냅샷은 35일 전부터라
+    이틀치 1분봉만으로는 비교선이 늘 비어 있었다.
+    """
+    rng = random.Random(seed_of("KRW-BTC-hourly"))
+    price = COINS["KRW-BTC"]
+    top = before_local.replace(minute=0)
+    out: list[BarClosed] = []
+    for h in range(1, 35 * 24 + 1):
+        price /= 1 + rng.gauss(0.0001, 0.004)
+        px = round(price)
+        out.append(BarClosed(UP, "KRW-BTC", "1m", top - timedelta(hours=h), px, px, px, px, 1.0))
+    return out
+
+
 def _book(price: float) -> dict[str, list[list[float]]]:
     tick = max(price * 0.0002, 0.01)
     rng = random.Random(int(price))
@@ -170,6 +187,7 @@ async def seed(sessions: Any, hub: Any, *, halt: bool) -> dict[str, float]:
     now_local = MarketClock(UP).now().replace(second=0, microsecond=0)
     start = now_local - timedelta(minutes=MINUTES - 1)
     candles = SqlCandleRepo(sessions)
+    await candles.upsert(_btc_history(start), source="demo")
     last: dict[str, float] = {}
     for sym in COINS:
         bars = _bars(sym, start)

@@ -493,6 +493,41 @@ async def _wait_done(ctx: Ctx, bid: int) -> dict[str, Any]:
     pytest.fail("backtest did not finish")
 
 
+async def test_test_sessions_do_not_share_a_connection():
+    """run_job의 쓰기가 커밋되기 전에 GET 조회 세션이 열고 닫혀도 쓰기가 남아야 한다.
+
+    연결 1개를 모든 세션이 같이 쓰면(StaticPool) 조회 세션이 반납될 때의 rollback이
+    아직 커밋 안 된 UPDATE를 지워, 백테스트가 done인데 metrics가 비는 일이 CI에서 났다 (t19·t38).
+    """
+    from sqlalchemy import select
+
+    from quantpilot.db.models import BacktestRow
+
+    engine, sessions = await memory_sessions()
+    async with sessions.begin() as s:
+        row = BacktestRow(
+            strategy="gem",
+            params={},
+            symbols=[],
+            source="synthetic",
+            unlocked_holdout=False,
+            cost_model={},
+            metrics={},
+            attempt_no=0,
+        )
+        s.add(row)
+        await s.flush()
+        bid = row.id
+    async with sessions.begin() as writer:
+        (await writer.get_one(BacktestRow, bid)).metrics = {"cagr": 0.1}
+        await writer.flush()  # UPDATE는 나갔지만 아직 커밋 전
+        async with sessions() as reader:  # 같은 때 들어온 GET /backtests/{id}
+            await reader.execute(select(BacktestRow.id))
+    async with sessions() as s:
+        assert (await s.get_one(BacktestRow, bid)).metrics == {"cagr": 0.1}
+    await engine.dispose()
+
+
 async def test_backtest_async_flow_and_report(ctx):
     seen: list[tuple[str, dict]] = []
 

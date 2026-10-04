@@ -172,11 +172,17 @@ export function TradeView({ market, symbol }: { market: string; symbol: string }
           )}
           {quote.isError ? <p className="px-[18px] pb-3 text-xs text-muted">현재가: {reasonText(quote.error)}</p> : null}
         </section>
-        <TradeTabs market={market} fills={fillRows} orders={orders.data?.items ?? []} positions={posList} />
+        <TradeTabs
+          market={market}
+          fills={fillRows}
+          orders={orders.data?.items ?? []}
+          positions={posList}
+          loading={{ fills: fills.isLoading, orders: orders.isLoading, positions: positions.isLoading }}
+        />
       </div>
 
       <div className="flex w-full shrink-0 flex-col gap-4 lg:w-[310px]">
-        <AiPanel symbol={symbol} judgment={latest} rules={settings.data?.risk_rules ?? null} />
+        <AiPanel symbol={symbol} judgment={latest} rules={settings.data?.risk_rules ?? null} loading={judgment.isLoading} />
         {isLive ? (
           <OrderPanel
             market={market}

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   CHART,
+  CHART_SM,
+  DD_SM,
   checklist,
   costRows,
   drawdownChart,
@@ -135,6 +137,14 @@ describe("로그 자산 곡선", () => {
     const c = equityChart(run(), { equity: pts([100, 110, 130], "2015-01-01") })!;
     expect(c.compare).not.toBeNull();
     expect(Number(c.compare!.split(" ")[0]!.split(",")[0])).toBeCloseTo(CHART.left, 0); // 비교가 더 일찍 시작
+  });
+
+  it("모바일 틀(CHART_SM)에서도 같은 곡선이 틀 안에 그려진다", () => {
+    const c = equityChart(run(), null, CHART_SM)!;
+    const xy = c.main.split(" ").map((p) => p.split(",").map(Number) as [number, number]);
+    expect(xy.every(([x, y]) => x >= CHART_SM.left && x <= CHART_SM.right && y >= CHART_SM.top && y <= CHART_SM.bottom)).toBe(true);
+    expect(c.holdout!.x + c.holdout!.w).toBeCloseTo(CHART_SM.right, 0);
+    expect(drawdownChart(run(), DD_SM)!.main.startsWith(`${DD_SM.left.toFixed(1)},${DD_SM.top}`)).toBe(true);
   });
 
   it("낙폭: 0%가 위, 가장 깊은 낙폭이 아래 (벤치마크 포함)", () => {

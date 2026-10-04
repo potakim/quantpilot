@@ -6,10 +6,8 @@ import argparse
 import asyncio
 import json
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
-
-import pandas as pd
 
 from quantpilot.backtest import AttemptTracker, Backtester, preset
 from quantpilot.config import settings
@@ -139,35 +137,27 @@ def cmd_report_ab(a: argparse.Namespace) -> int:
 async def build_ab_report(
     sessions: Any, market: Market, *, weeks: int, now: datetime, initial_cash: float | None = None
 ) -> dict[str, Any]:
-    """최근 weeks주 A/B 리포트 dict. 원장 곡선은 계좌 시작부터 재생하고 1시간 종가로 평가한다."""
-    from quantpilot.core.clock import to_local
-    from quantpilot.db.repo import SqlCandleRepo, SqlJudgmentRepo, SqlLedger
-    from quantpilot.judgment.ab import ab_report, book_stats
+    """최근 weeks주 A/B 리포트 dict (구현은 db/reports.py — API와 같은 코드, ADR 0030)."""
+    from quantpilot.db.reports import build_ab_report as build
 
-    end = to_local(now, market)
-    start = end - timedelta(weeks=weeks)
-    cash = initial_cash
-    if cash is None:
-        cash = settings.initial_cash_usd if market == Market.US else settings.initial_cash_krw
-    judgments = await SqlJudgmentRepo(sessions).between(market, start, end)
-    on = await SqlLedger(sessions).fills(market)
-    off = await SqlLedger(sessions, shadow=True).fills(market)
-    first = min((f.ts for f in on + off), default=start)
-    candles = SqlCandleRepo(sessions)
-    prices = {}
-    for sym in sorted({f.symbol for f in on + off}):
-        bars = await candles.load(market, sym, "1m", min(first, start), end)
-        if bars:
-            s = pd.Series([b.close for b in bars], index=pd.DatetimeIndex([b.ts for b in bars]))
-            prices[sym] = s.resample("1h").last().dropna()
-    return ab_report(
-        judgments,
-        book_stats(on, prices, cash, start, end),
-        book_stats(off, prices, cash, start, end),
-        start=start,
-        end=end,
-        signals=len(judgments),
-    )
+    return await build(sessions, market, weeks=weeks, now=now, initial_cash=initial_cash)
+
+
+def cmd_gate_g1(a: argparse.Namespace) -> int:
+    """qp gate g1 [--write]: 관문 G1 판정. --write면 settings에 남겨 /reports/gates가 읽게 한다."""
+    from quantpilot.ops.g1 import run_all, write_reports
+
+    results = run_all(CandleCache(settings.cache_dir), AttemptTracker(settings.attempts_file))
+    for r in results:
+        print(f"{'G1 PASS' if r.ok else 'G1 미달'}  {r.line}")
+    if a.write:
+        from quantpilot.db.repo import SqlConfigRepo
+        from quantpilot.db.session import make_sessions
+
+        sessions = make_sessions(a.db_url or settings.db_url)
+        n = asyncio.run(write_reports(SqlConfigRepo(sessions), results))
+        print(f"DB 기록: {n}개 전략 (gate_report.g1.*)")  # URL은 출력하지 않는다 (불변식 #10)
+    return 0 if all(r.ok for r in results) else 1
 
 
 def cmd_serve(a: argparse.Namespace) -> int:
@@ -224,6 +214,13 @@ def main(argv: list[str] | None = None) -> int:
     ab.add_argument("--out", default=None, help="마크다운 파일로도 저장")
     ab.add_argument("--json", action="store_true")
     ab.set_defaults(fn=cmd_report_ab)
+
+    g = sub.add_parser("gate", help="관문 판정")
+    gs = g.add_subparsers(dest="gate", required=True)
+    g1 = gs.add_parser("g1", help="관문 G1: 백테스트 vs 공개 수치·독립 구현 (ADR 0024·0030)")
+    g1.add_argument("--write", action="store_true", help="결과를 DB settings에 기록")
+    g1.add_argument("--db-url", default=None, help="기본 settings.db_url")
+    g1.set_defaults(fn=cmd_gate_g1)
 
     s = sub.add_parser("serve", help="FastAPI 서버")
     s.add_argument("--host", default="127.0.0.1")

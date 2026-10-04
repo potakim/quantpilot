@@ -20,7 +20,7 @@
 | 엔진·스케줄러·API·화면 | 업비트 웹소켓 엔진, APScheduler 잡, API v1 + WS + JWT, Next.js 대시보드·거래·AI 판단 로그·모바일 | `quantpilot/engine/`, `scheduler/`, `api/`, `web/` |
 | 운영 | paper compose, 배포 가드, 백업, CI(pytest·ruff·web·이미지) | `deploy/`, `scripts/`, `.github/workflows/` |
 
-관문 G1은 통과했다(2026-10-03, ADR 0024: GEM은 같은 기간 공개 수치, 변동성 돌파는 독립 기준 구현과 대조).
+관문 G1은 통과했다(2026-10-03, ADR 0024: GEM은 같은 기간 공개 수치, 변동성 돌파는 독립 기준 구현과 대조). 운영 화면에 보이려면 VPS에서 `qp gate g1 --write`로 기록한다(docs/07 §2, ADR 0030). G2는 페이퍼 운영 데이터로 `/reports/gates`·AI 판단 로그 화면에서 자동 계산된다.
 
 아직 확인하지 않은 것: 실제 API 키로의 외부 호출(TypeSafe·Anthropic·Gemini·DART·텔레그램), VPS에서의 TimescaleDB·2프로세스 종단 실행.
 
@@ -41,9 +41,9 @@ qp judge --news "상장폐지 검토"           # 스텁 판단: hard block → 
 
 # 실데이터 (인터넷 필요)
 qp fetch upbit KRW-BTC KRW-ETH KRW-SOL KRW-XRP KRW-ADA --count 3500
-qp fetch yfinance SPY ACWX AGG BIL --start 2005-01-01
+qp fetch yfinance SPY ACWX VEU AGG BIL --start 2005-01-01
 qp backtest vol_breakout --source upbit
-python scripts/verify_g1.py                # 관문 G1
+qp gate g1                                 # 관문 G1 (--write: DB에 기록 → /reports/gates, ADR 0030)
 
 # 게이팅 A/B 리포트 (관문 G2, 페이퍼 운영 기록 필요)
 qp report ab --weeks 4

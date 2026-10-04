@@ -785,6 +785,31 @@ async def test_reports_gates_shape(ctx):
     assert body["g3"]["pass"] is False and body["g4"]["pass"] is False
 
 
+async def test_gate_evidence_wired_from_db(ctx):
+    """ADR 0030: qp gate g1 --write 결과를 G1이 읽고, 운영 앱의 DbCalibration이 G2·A/B를 채운다."""
+    from quantpilot.api.app import create_app
+    from quantpilot.api.calibration import DbCalibration
+    from quantpilot.ops.g1 import G1Result, write_reports
+
+    ev = {"basis": "독립 기준 구현 ±10%", "metrics": {"cagr": 0.0633}}
+    results = [G1Result("vol_breakout", True, 0, "line", ev), G1Result("gem", False, 0, "no data")]
+    assert (
+        await write_reports(SqlConfigRepo(ctx.sessions), results) == 1
+    )  # 데이터 없는 전략은 안 쓴다
+    g1 = (await ctx.client.get(f"{API}/reports/gates", headers=ctx.h)).json()["g1"]
+    vb = g1["evidence"]["by_strategy"]["vol_breakout"]
+    assert vb["pass"] is True and vb["evidence"]["basis"].startswith("독립 기준 구현")
+
+    assert isinstance(create_app(db_calibration=True).state.deps.calibration, DbCalibration)
+    ctx.app.state.deps.calibration = DbCalibration(ctx.app.state.deps)
+    ab = await ctx.client.get(f"{API}/judgments/ab", headers=ctx.h)
+    assert ab.status_code == 200 and ab.json()["g2"] == "pending"  # 표본 0건 → 판정 보류
+    cal = (await ctx.client.get(f"{API}/judgments/calibration", headers=ctx.h)).json()
+    assert cal["n"] == 0
+    g2 = (await ctx.client.get(f"{API}/reports/gates", headers=ctx.h)).json()["g2"]
+    assert g2["pass"] is False and "reason" not in g2
+
+
 async def test_claude_answerer_with_fake_client_and_default_stub(tmp_path):
     from types import SimpleNamespace
 

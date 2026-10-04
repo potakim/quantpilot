@@ -165,6 +165,44 @@ def test_build_ab_report_from_db(db_url):
     assert r["g2"] == "pass" and r["g2_pass"]
 
 
+def test_db_calibration_serves_same_report_as_cli_with_cache(db_url, monkeypatch):
+    """API의 DbCalibration은 qp report ab와 같은 계산을 쓰고, 60초 안의 재요청은 캐시를 쓴다 (ADR 0030)."""
+    from types import SimpleNamespace
+
+    from quantpilot.api.calibration import DbCalibration
+    from quantpilot.config import settings
+    from quantpilot.db import reports
+
+    monkeypatch.setattr(settings, "initial_cash_krw", 10_000_000)
+    now = datetime(2026, 9, 30, 3, 0, tzinfo=UTC)
+    sessions = _sessions(db_url)
+    calls = []
+    real = reports.build_ab_report
+
+    async def counting(*a, **k):
+        calls.append(k["weeks"])
+        return await real(*a, **k)
+
+    monkeypatch.setattr(reports, "build_ab_report", counting)
+    t = [0.0]
+    cal = DbCalibration(
+        SimpleNamespace(sessions=sessions, utcnow=lambda: now), monotonic=lambda: t[0]
+    )
+
+    async def go():
+        await _seed(sessions, to_local(now, M))
+        c = await cal.calibration(4)
+        ab = await cal.ab(4)
+        t[0] = 61.0
+        await cal.ab(4)
+        return c, ab
+
+    c, ab = asyncio.run(go())
+    assert c["n"] == 25 and c["brier"] == pytest.approx((20 * 0.08**2 + 5 * 0.55**2) / 25)
+    assert ab["g2_pass"] and ab["on"]["n_trades"] == 2 and "calibration" not in ab
+    assert calls == [4, 4]  # 첫 호출 + 60초 지난 뒤 한 번 (중간 호출은 캐시)
+
+
 def test_qp_report_ab_prints_markdown_and_json(db_url, tmp_path, capsys):
     from quantpilot.cli import main
 

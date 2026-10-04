@@ -40,6 +40,14 @@ curl -s 127.0.0.1:8000/api/v1/health             # ok·paper=true·engine_alive 
 - db·redis는 호스트 포트가 없고 api는 `127.0.0.1:8000`에만 열린다. 밖에서 볼 때는 `ssh -L 8000:127.0.0.1:8000 vps` 또는 HTTPS 앞단(후속 카드).
 - 업데이트: `app/scripts/deploy.sh --tag <커밋 sha>`(기본 `latest`). engine 재시작 전 가드가 위 규칙(ADR 0029)을 확인하고, 걸리면 api·scheduler까지만 갱신한 뒤 멈춘다. 그래도 진행하려면 `--force`. `--dry-run`도 docker가 있으면 `compose config`로 설정을 실제로 검사한다.
 - 이미지를 VPS에서 직접 만들 때는 `--build`.
+- 관문 G1 증거 기록(ADR 0030) — 첫 배포 후 한 번. 그 뒤로는 전략·파라미터를 바꿀 때마다 다시 실행한다. 데이터 캐시는 `appdata` 볼륨에 남는다:
+  ```bash
+  docker compose -f app/deploy/compose.yml --env-file .env run --rm api sh -c \
+    "qp fetch yfinance SPY VEU AGG BIL --start 2005-01-01 && \
+     qp fetch upbit KRW-BTC KRW-ETH KRW-SOL KRW-XRP KRW-ADA --count 3500 && \
+     qp gate g1 --write"
+  ```
+  이후 `/reports/gates`와 대시보드의 G1이 실제 결과로 바뀐다. G2(보정·A/B)는 페이퍼 운영 데이터로 자동 계산된다(표본 20건 전에는 "판정 보류").
 - 화면(web, P1-13)까지 띄우려면 `--web`. web은 `127.0.0.1:3000`에 열리고, 브라우저 WS는 `QP_WS_URL`(기본 `ws://127.0.0.1:8000/api/v1/ws`)로 api에 직접 붙으므로 SSH 터널은 두 포트 모두 연다: `ssh -L 3000:127.0.0.1:3000 -L 8000:127.0.0.1:8000 vps`. HTTPS 앞단을 둔 뒤에는 env 파일에 `QP_WS_URL=wss://<도메인>/api/v1/ws`.
 
 ### 2.2 백업·복원

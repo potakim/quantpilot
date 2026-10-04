@@ -65,8 +65,12 @@ def create_app(
     notifier: Any = None,
     utcnow: Callable[[], datetime] | None = None,
     ws_idle: float = 30.0,
+    db_calibration: bool = False,
 ) -> FastAPI:
-    """API 앱을 만든다. 빠진 부품은 설정으로 만든다(세션은 처음 쓸 때)."""
+    """API 앱을 만든다. 빠진 부품은 설정으로 만든다(세션은 처음 쓸 때).
+
+    db_calibration=True면 calibration이 없을 때 운영 DB를 읽는 DbCalibration을 붙인다 (ADR 0030).
+    """
     if settings is None:
         from quantpilot.config import settings as default_settings
 
@@ -99,6 +103,10 @@ def create_app(
     )
     if utcnow is not None:
         deps.utcnow = utcnow
+    if db_calibration and deps.calibration is None:
+        from quantpilot.api.calibration import DbCalibration
+
+        deps.calibration = DbCalibration(deps)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -137,4 +145,4 @@ def create_app(
     return app
 
 
-app = create_app()
+app = create_app(db_calibration=True)  # 운영 앱: G2 증거를 DB에서 (ADR 0030)

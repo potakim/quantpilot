@@ -37,4 +37,4 @@
 | 0031 | 실시간 시장 범위: `LIVE_MARKETS`만 계좌 합계·일정·주문에 포함, 나머지 시장은 화면에서 "2단계 예정", 일봉 전용 소스의 분봉 요청 거부 | 승인 |
 | 0032 | 엔진이 전략 설정(켜기/끄기·배분·파라미터)과 AI 판단 설정을 따른다: 설정 없으면 권장 조합 기본값, 꺼짐·배분 0은 진입만 막음, 사이징 = 평가액 × 배분, 임계값 즉시·판단 모델은 재시작 | 승인 |
 | 0033 | 백테스트 화면 지표: 벤치마크 = 대표 종목 보유(비용 없음), 구간 성과 서버 계산(전체·최근 3년·최근 1년), 최근 3년 열위 표시, 홀드아웃 `data_end`, 실행 전 `cost_model`, 비교 겹쳐 보기 | 승인 |
-| 0034 | `strategy.status`는 실시간 엔진이 보낸다: 하트비트마다 바뀐 전략만 `{name, market, enabled, allocation, position}`, next_action은 REST `/schedule`, scheduler 09:00 발행은 로그로만, 화면 토글은 저장값 | 제안 |
+| 0034 | `strategy.status`는 실시간 엔진이 보낸다: 하트비트마다 바뀐 전략만 `{name, market, enabled, allocation, position}`, next_action은 REST `/schedule`, scheduler 09:00 발행은 로그로만, 화면 토글은 저장값 | 승인 |

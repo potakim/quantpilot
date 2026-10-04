@@ -39,9 +39,12 @@ export interface JudgmentPush {
   [k: string]: unknown;
 }
 
+/** 엔진이 지금 적용 중인 전략 상태 (ADR 0034). 바뀐 전략만 오고, 받으면 전략 목록을 다시 읽는다. */
 export interface StrategyStatusPush {
   name: string;
+  market?: string;
   enabled?: boolean;
+  allocation?: number;
   position?: unknown;
   next_action?: { at?: string; what?: string } | null;
   ts: string | null;
@@ -114,7 +117,8 @@ export function applyMessage(s: LiveState, msg: LiveMessage): Partial<LiveState>
   }
   if (ch === "strategy.status") {
     if (typeof data.name !== "string") return {};
-    const item = { ...data, name: data.name, ts } as StrategyStatusPush;
+    // 일부 필드만 와도 앞서 받은 나머지는 남긴다
+    const item = { ...s.strategyStatus[data.name], ...data, name: data.name, ts } as StrategyStatusPush;
     return {
       strategyStatus: { ...s.strategyStatus, [data.name]: item },
       seq: { ...s.seq, strategy: s.seq.strategy + 1 },

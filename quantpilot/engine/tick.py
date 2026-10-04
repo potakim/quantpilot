@@ -191,6 +191,23 @@ class TickRunner:
         enabled, alloc = self._configs.get(name, (False, 0.0))
         return enabled and alloc > 0
 
+    def strategy_status(self) -> list[dict[str, Any]]:
+        """전략별 화면 상태 {name, enabled, allocation, position} (WS strategy.status, ADR 0034).
+
+        지금 적용 중인 설정과 ON 원장 보유 수량이다(섀도 제외). 설정을 아직 받지 않았으면 빈 목록.
+        """
+        if self._configs is None:
+            return []
+        held = self.executor.positions()
+        out = []
+        for s in self.strategies:
+            enabled, alloc = self._configs.get(s.name, (False, 0.0))
+            position = {sym: p.qty for sym, p in held.items() if p.strategy == s.name}
+            out.append(
+                {"name": s.name, "enabled": enabled, "allocation": alloc, "position": position}
+            )
+        return out
+
     # ---------- 이벤트 입구 ----------
     async def on_bar_closed(self, ev: BarClosed) -> None:
         """봉 1개 마감."""

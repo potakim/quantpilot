@@ -109,7 +109,7 @@ FastAPI, base `/api/v1`. 인증은 `Authorization: Bearer <JWT>` (단일 사용�
 | `risk` | risk_events 행 | 발생 시 |
 | `portfolio` | `/portfolio` 응답의 변경분 | 5초 |
 | `backtest:{id}` | `{progress:0~1, stage}` → 완료 시 `{done:true}` | 진행 중 |
-| `strategy.status` | 전략별 `{name, enabled, position, next_action:{at, what}}` | 변경 시 |
+| `strategy.status` | 전략 하나에 `{name, market, enabled, allocation, position:{심볼: 수량}}` — 엔진이 지금 적용 중인 값. 보내는 쪽은 실시간 엔진, 오늘 할 일(목표가)은 REST `/schedule` (ADR 0034) | 변경 시 (엔진 하트비트 5초마다 비교, 시작 시 전부) |
 
 클라이언트 → 서버: `{"subscribe": [...]}`, `{"unsubscribe": [...]}`, `{"ping": 1}`. 30초 무응답 시 서버가 끊는다.
 

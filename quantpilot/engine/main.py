@@ -5,6 +5,7 @@ EngineLink가 있으면 타이머가 link_every초마다 하트비트를 쓰고,
 TickRunner.on_time_exit로 실행한 뒤 ack한다 (04 §8). 수동 주문 큐(ManualOrderConsumer, ADR 0017)도
 같은 타이머에서 비운다. 이벤트는 HubBus로 허브(Redis pub/sub) → api WS 허브 → 화면에 간다 (P1-12).
 전략 설정(켜기/끄기·배분·파라미터)과 확신도 임계값도 시작 직후와 하트비트마다 읽어 반영한다 (ADR 0032).
+그 뒤 전략별 상태(켜짐·배분·보유)가 바뀌었으면 WS `strategy.status`로 화면에 알린다 (ADR 0034).
 
 같은 구간의 봉은 심볼마다 확정 시점이 다르다(다음 체결이 먼저 오면 즉시, 아니면 마감 + grace 타이머).
 여러 심볼을 보는 전략이 한 시각에 한 번만 평가되도록, 확정된 봉은 그 구간의 마감 + grace까지 모았다가
@@ -75,11 +76,12 @@ class MarketEngine:
         self.link_every = link_every
         self.orders = orders
         self.news = news  # scheduler가 DB에 쌓은 뉴스 → 피처 빌더 캐시 (ADR 0021)
-        self.hub = hub  # /health의 시세 연결 표시 (feed 키, ADR 0029)
+        self.hub = hub  # 시세 연결 표시 feed 키 (ADR 0029) · strategy.status (ADR 0034)
         self._monotonic = monotonic
         self._last_feed: float | None = None
         self._closed: list[BarClosed] = []
         self._last_link: datetime | None = None
+        self._last_status: dict[str, dict] = {}  # 전략 이름 → 마지막으로 보낸 상태
 
     async def on_trade(self, ev: TradeEvent) -> None:
         """체결 1건: 손절 검사(판단 모델 없음) 후 봉 집계."""
@@ -151,7 +153,27 @@ class MarketEngine:
             await self._sync_configs(market)
             await self._sync_gate()
         self.runner.restore_state(now, done)
+        await self._publish_status()
         log.info("engine state restored", extra={"market": market.value})
+
+    async def _publish_status(self) -> None:
+        """지난번과 달라진 전략 상태만 WS `strategy.status`로 보낸다 (ADR 0034). 표시용이라 실패해도 매매는 계속."""
+        status = getattr(self.runner, "strategy_status", None)
+        if self.hub is None or status is None:
+            return
+        from quantpilot.realtime.bus import message
+
+        market = self.runner.market
+        for item in status():
+            if self._last_status.get(item["name"]) == item:
+                continue
+            data = {**item, "market": Market(market).value}
+            try:
+                await self.hub.publish("strategy.status", message(None, data, market))
+            except Exception as e:  # noqa: BLE001 — 화면 표시 실패로 매매가 멈추면 안 된다
+                log.warning("strategy.status publish failed", extra={"error": type(e).__name__})
+                return
+            self._last_status[item["name"]] = item
 
     def _risks(self) -> list:
         """ON·섀도 원장의 RiskManager (섀도도 같은 월 기준으로 서킷브레이커를 건다)."""
@@ -186,6 +208,7 @@ class MarketEngine:
             log.info("time_exit 명령 처리", extra={"strategy": s.name, "cmd": cmd_id})
             await self.runner.on_time_exit(s.name)
             await self.link.ack_time_exit(market, s.name, cmd_id)
+        await self._publish_status()
 
     async def _sync_configs(self, market) -> None:
         """저장된 전략 설정을 기본값과 합쳐 TickRunner에 넘긴다 (ADR 0032)."""

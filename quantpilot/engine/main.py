@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -31,6 +32,7 @@ from quantpilot.data.aggregator import CandleAggregator
 from quantpilot.data.store import CandleStore
 from quantpilot.engine.daily import DailyRollup
 from quantpilot.engine.tick import TickRunner
+from quantpilot.realtime import keys as hk
 
 if TYPE_CHECKING:
     from quantpilot.core.ports import Hub
@@ -42,6 +44,9 @@ log = logging.getLogger(__name__)
 
 # 시작 시 받는 과거 일봉 수 — 변동성 돌파 warmup 25봉 + 이평 20일에 여유 (ADR 0025)
 DAILY_SEED_DAYS = 60
+# 시세 연결 표시 (realtime/keys.feed): 체결이 60초 없으면 끊김으로 보인다 (ADR 0029)
+FEED_TTL = 60.0
+FEED_EVERY = 10.0
 
 
 class MarketEngine:
@@ -58,6 +63,8 @@ class MarketEngine:
         link_every: float = 5.0,
         orders: ManualOrderConsumer | None = None,
         news: NewsRefresher | None = None,
+        hub: Hub | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
     ):
         self.runner = runner
         self.aggregator = aggregator
@@ -67,11 +74,15 @@ class MarketEngine:
         self.link_every = link_every
         self.orders = orders
         self.news = news  # scheduler가 DB에 쌓은 뉴스 → 피처 빌더 캐시 (ADR 0021)
+        self.hub = hub  # /health의 시세 연결 표시 (feed 키, ADR 0029)
+        self._monotonic = monotonic
+        self._last_feed: float | None = None
         self._closed: list[BarClosed] = []
         self._last_link: datetime | None = None
 
     async def on_trade(self, ev: TradeEvent) -> None:
         """체결 1건: 손절 검사(판단 모델 없음) 후 봉 집계."""
+        await self._mark_feed()
         await self.runner.on_stop_check(ev)
         bus = getattr(self.runner, "bus", None)
         if bus is not None:
@@ -105,6 +116,19 @@ class MarketEngine:
                     log.error("candle store failed", extra={"error": type(e).__name__})
             await self.runner.on_bars_closed(groups[ts])
         return len(due)
+
+    async def _mark_feed(self) -> None:
+        """체결을 받는 중임을 허브 feed 키에 남긴다 (TTL 60초, 10초에 한 번 갱신)."""
+        if self.hub is None:
+            return
+        now = self._monotonic()
+        if self._last_feed is not None and now - self._last_feed < FEED_EVERY:
+            return
+        self._last_feed = now
+        try:
+            await self.hub.set(hk.feed(self.runner.market), 1, ttl=FEED_TTL)
+        except Exception as e:  # noqa: BLE001 — 표시용 키 실패로 손절·매매가 멈추면 안 된다
+            log.warning("feed mark failed", extra={"error": type(e).__name__})
 
     async def restore(self) -> None:
         """재시작 직후 상태 복원 (ADR 0028): 계좌 → 월 손실 기준선 → 손절선·오늘 처리 표시."""
@@ -333,6 +357,7 @@ def build_upbit_paper(
         link=link,
         orders=orders,
         news=refresher,
+        hub=hub,
     )
 
 
@@ -367,10 +392,11 @@ def main() -> None:
     from quantpilot.config import settings
     from quantpilot.data.upbit_ws import UpbitStream
     from quantpilot.db.session import make_sessions
+    from quantpilot.logsetup import setup_logging
     from quantpilot.notify.telegram import CriticalLogHandler, from_settings
     from quantpilot.realtime.hub import make_hub
 
-    logging.basicConfig(level=logging.INFO)
+    setup_logging()  # httpx가 URL(토큰·키 포함)을 남기지 않게 (ADR 0029)
     logging.getLogger().addHandler(CriticalLogHandler(from_settings(settings)))  # 청산 실패 등
     from quantpilot.strategies import create
 

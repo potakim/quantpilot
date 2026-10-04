@@ -25,6 +25,10 @@ async def engine_heartbeat(ctx: JobContext) -> None:
     """
     for market in ctx.markets:
         alive = await engine_alive(ctx, market)
+        if not alive and ctx.link is not None and await ctx.link.last_beat(market) is None:
+            # 엔진이 한 번도 뜨지 않았다(첫 배포 순서상 scheduler가 먼저 뜬다) — 끊김 경보가 아니다 (ADR 0029)
+            log.info("engine not started yet", extra={"market": market.value})
+            continue
         if not alive and market not in ctx.backup_armed:
             ctx.backup_armed.add(market)
             await ctx.notifier.send(

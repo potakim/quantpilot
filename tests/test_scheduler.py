@@ -328,6 +328,19 @@ async def test_heartbeat_loss_arms_backup_once_and_recovers():
     assert not ctx.backup_armed
 
 
+async def test_heartbeat_never_started_engine_is_not_an_alarm():
+    """첫 배포: scheduler가 엔진보다 먼저 뜬다 — 한 번도 하트비트가 없으면 critical·백업 모드 없음 (ADR 0029)."""
+    now = Now()
+    ctx = _ctx(now)
+    now.t = T0 + timedelta(seconds=300)
+    await health.engine_heartbeat(ctx)
+    assert ctx.notifier.sent == [] and not ctx.backup_armed
+    await ctx.link.beat(UP)  # 엔진이 뜬 뒤 끊기면 지금처럼 경보
+    now.t = T0 + timedelta(seconds=600)
+    await health.engine_heartbeat(ctx)
+    assert [lv for lv, _ in ctx.notifier.sent] == ["critical"] and UP in ctx.backup_armed
+
+
 async def test_heartbeat_backup_runs_command_engine_never_acked():
     runner = SpyRunner()
 

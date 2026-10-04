@@ -80,8 +80,18 @@ def build_context(sessions: Sessions, markets: tuple[Market, ...] = (Market.UPBI
         brokers=brokers,
         news=make_news_collector(settings, SqlNewsRepo(sessions)),
         reviewer=make_daily_reviewer(settings),
-        hooks={"upbit_prescreen": make_prescreen(settings, SqlNewsRepo(sessions))},
+        hooks=_hooks(sessions),
     )
+
+
+def _hooks(sessions: Any) -> dict[str, Any]:
+    """잡 훅. 만들다 실패한 훅만 빼고 시작한다 — AI 설정 하나로 청산·감시 잡까지 멈추면 안 된다 (ADR 0029)."""
+    hooks: dict[str, Any] = {}
+    try:
+        hooks["upbit_prescreen"] = make_prescreen(settings, SqlNewsRepo(sessions))
+    except Exception as e:  # noqa: BLE001 — 키 누락·SDK 미설치 등. 메시지에 키가 섞일 수 있어 형식만 남긴다
+        log.error("prescreen hook disabled", extra={"error": type(e).__name__})
+    return hooks
 
 
 def sync_url(url: str) -> str:
@@ -126,7 +136,9 @@ async def run() -> None:
 
 def main() -> None:
     """scheduler 실행."""
-    logging.basicConfig(level=logging.INFO)
+    from quantpilot.logsetup import setup_logging
+
+    setup_logging()  # httpx가 URL(토큰·키 포함)을 남기지 않게 (ADR 0029)
     asyncio.run(run())
 
 

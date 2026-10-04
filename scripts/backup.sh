@@ -59,6 +59,8 @@ EOF
   fi
 else
   # VPS: compose 프로젝트의 db·api 컨테이너에서 받는다
+  # compose.yml의 env_file(${QP_ENV_FILE})도 --env-file과 같은 파일을 보게 한다 (ADR 0029)
+  export QP_ENV_FILE="$ENV_FILE"
   COMPOSE=(docker compose -f "$ROOT/deploy/compose.yml" --env-file "$ENV_FILE")
   "${COMPOSE[@]}" exec -T db pg_dump -U quantpilot -d quantpilot -Fc > "$OUT/qp-db-$STAMP.dump"
   "${COMPOSE[@]}" exec -T api tar -C /app/data "${EXCLUDES[@]}" -czf - . \

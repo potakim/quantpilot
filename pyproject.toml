@@ -42,7 +42,7 @@ infra = [
     # scheduler의 APScheduler 잡 저장소는 동기 드라이버를 쓴다 (scheduler/main.py::sync_url, P1-14)
     "psycopg[binary]>=3.1",
     "redis>=5.0",
-    "apscheduler>=3.10",
+    "apscheduler>=3.10,<4",  # 4.0은 schedulers.asyncio·jobstores.sqlalchemy API가 없다 (ADR 0029)
     "exchange-calendars>=4.5",
 ]
 dev = [

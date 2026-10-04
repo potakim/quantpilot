@@ -6,6 +6,8 @@ import { useEffect, useMemo } from "react";
 import { apiFetch } from "@/lib/api";
 import type {
   AbReport,
+  BacktestListItem,
+  BacktestRun,
   Calibration,
   CostsAi,
   EquityCurve,
@@ -64,6 +66,24 @@ export const useGates = () =>
 
 export const useSettings = () =>
   useQuery({ queryKey: ["settings"], queryFn: () => apiFetch<SettingsView>("/settings"), staleTime: 60_000 });
+
+export const useBacktests = (strategy?: string) =>
+  useQuery({
+    queryKey: ["backtests", strategy ?? "all"],
+    queryFn: () => apiFetch<BacktestListItem[]>(`/backtests${qs({ strategy })}`),
+  });
+
+/** 백테스트 1건. 실행 중이면 3초마다 다시 읽는다 — WS 진행률이 끊겨도 끝을 놓치지 않게 (ADR 0033) */
+export const useBacktest = (id: number | null) =>
+  useQuery({
+    queryKey: ["backtest", id],
+    queryFn: () => apiFetch<BacktestRun>(`/backtests/${id}`),
+    enabled: id != null,
+    refetchInterval: (q) => {
+      const st = q.state.data?.status;
+      return st === "queued" || st === "running" ? 3_000 : false;
+    },
+  });
 
 export const useCostsAi = () =>
   useQuery({ queryKey: ["costs-ai"], queryFn: () => apiFetch<CostsAi>("/costs/ai"), staleTime: 300_000 });

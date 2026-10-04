@@ -18,6 +18,7 @@ from quantpilot.api import gates, metrics
 from quantpilot.api.auth import require_user
 from quantpilot.api.deps import Deps, DepsDep
 from quantpilot.api.errors import ApiError
+from quantpilot.backtest.costs import preset
 from quantpilot.core import clock
 from quantpilot.core.models import Market
 from quantpilot.execution.risk import RiskRules
@@ -109,6 +110,8 @@ async def _view(
             "enabled": cfg["enabled"],
             "allocation": cfg["allocation"],
             "paper": cfg["paper"],
+            # 백테스터·PaperBroker가 쓰는 비용 모델 — 실행 전 화면 표시용 (ADR 0033, 불변식 #4)
+            "cost_model": dict(preset(cls.market).__dict__),
             "status": {
                 "position": {p.symbol: p.qty for p in positions},
                 "month_pnl": st.get("month_pnl"),

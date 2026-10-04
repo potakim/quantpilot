@@ -6,7 +6,8 @@
         "http://localhost:3000/",
         "http://localhost:3000/trade/upbit/KRW-BTC",
         "http://localhost:3000/judgments",
-        "http://localhost:3000/strategies"
+        "http://localhost:3000/strategies",
+        "http://localhost:3000/backtests"
       ],
       "numberOfRuns": 1,
       "puppeteerScript": "./lighthouse/login.cjs",

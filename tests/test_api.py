@@ -430,6 +430,7 @@ async def test_strategies_list_merges_registry_and_config(ctx):
     assert vb["enabled"] and vb["allocation"] == 0.1 and vb["params"]["k"] == 0.6
     assert vb["symbols"] == [SYM] and vb["paper"] is True
     assert {"position", "month_pnl", "mdd_30d"} <= set(vb["status"]) and "g1" in vb["gate"]
+    assert vb["cost_model"]["fee_rate"] > 0  # 실행 전 비용 모델 표시 (ADR 0033)
     assert by["gem"]["enabled"] is False
     one = await ctx.client.get(f"{API}/strategies/vol_breakout", headers=ctx.h)
     assert one.json()["params"]["k"] == 0.6
@@ -513,6 +514,21 @@ async def test_backtest_async_flow_and_report(ctx):
     assert body["cost_model"]["fee_rate"] > 0
     assert 0 < len(body["equity"]) <= 501 and len(body["drawdown"]) == len(body["equity"])
     assert all(p["v"] <= 0 for p in body["drawdown"])
+    # 화면 지표 (ADR 0033): 벤치마크·구간 성과·잘라내기 전 데이터 끝·실행 정보
+    assert body["source"] == "synthetic" and body["created_at"] and body["symbols"]
+    bench = body["benchmark"]
+    assert bench["symbol"] == "SPY" and bench["label"] == "S&P 500 보유"
+    assert bench["points"][0]["v"] == pytest.approx(body["equity"][0]["v"])  # 같은 시작 자본
+    assert len(bench["drawdown"]) == len(bench["points"]) <= 501
+    # 곡선이 3년보다 짧으면 "최근 3년" 행은 빠진다 (이 합성 데이터는 홀드아웃을 빼고 약 1.5년)
+    first, last = (datetime.fromisoformat(body["equity"][i]["ts"]) for i in (0, -1))
+    years = (last - first).days / 365.25
+    expected = ["all", "3y", "1y"] if years > 3 else ["all", "1y"]
+    assert [r["key"] for r in body["periods"]] == expected
+    full = body["periods"][0]
+    assert full["cagr"] == pytest.approx(body["metrics"]["cagr"], abs=0.02)
+    assert full["excess"] == pytest.approx(full["cagr"] - full["bench_cagr"])
+    assert body["data_end"][:10] > body["holdout_cutoff"]  # 홀드아웃 12개월은 잘린 뒤에 있다
     # 진행 채널
     collector.cancel()
     assert {ch for ch, _ in seen} == {f"backtest:{bid}"}

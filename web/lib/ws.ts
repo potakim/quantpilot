@@ -47,6 +47,15 @@ export interface StrategyStatusPush {
   ts: string | null;
 }
 
+/** 백테스트 진행 (WS `backtest:{id}`, ADR 0033) */
+export interface BacktestProgress {
+  progress: number;
+  stage: string;
+  done: boolean;
+  status: string | null;
+  error: string | null;
+}
+
 export interface LiveState {
   status: LiveStatus;
   equity: Record<string, { equity: number; ts: string | null }>;
@@ -55,6 +64,7 @@ export interface LiveState {
   ticks: Record<string, Tick>;
   orderbooks: Record<string, Record<string, unknown>>;
   fills: Record<string, unknown>[];
+  backtests: Record<string, BacktestProgress>;
   seq: { portfolio: number; judgments: number; strategy: number; fills: number; risk: number; orders: number };
   lastError: string | null;
 }
@@ -68,6 +78,7 @@ export function initialLiveState(): LiveState {
     ticks: {},
     orderbooks: {},
     fills: [],
+    backtests: {},
     seq: { portfolio: 0, judgments: 0, strategy: 0, fills: 0, risk: 0, orders: 0 },
     lastError: null,
   };
@@ -125,6 +136,18 @@ export function applyMessage(s: LiveState, msg: LiveMessage): Partial<LiveState>
       ts,
     };
     return { ticks: { ...s.ticks, [key]: tick } };
+  }
+  if (ch.startsWith("backtest:")) {
+    const progress = num(data.progress);
+    if (progress === null) return {};
+    const item: BacktestProgress = {
+      progress,
+      stage: typeof data.stage === "string" ? data.stage : "",
+      done: data.done === true,
+      status: typeof data.status === "string" ? data.status : null,
+      error: typeof data.error === "string" ? data.error : null,
+    };
+    return { backtests: { ...s.backtests, [ch.slice("backtest:".length)]: item } };
   }
   if (ch.startsWith("orderbook:")) {
     return { orderbooks: { ...s.orderbooks, [ch.slice("orderbook:".length)]: data } };

@@ -65,6 +65,9 @@ class MemConfig:
     async def set_setting(self, key, value):
         self.d[key] = value
 
+    async def strategies(self, market=None):
+        return []  # 전략 설정 행 없음 → 엔진은 기본 설정 (ADR 0032)
+
 
 class Notes:
     def __init__(self):

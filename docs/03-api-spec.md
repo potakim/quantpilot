@@ -13,6 +13,7 @@ FastAPI, base `/api/v1`. 인증은 `Authorization: Bearer <JWT>` (단일 사용�
 | HTTP | code | 상황 |
 | --- | --- | --- |
 | 400 | `INVALID_PARAM` | ParamSpec 범위 밖, 알 수 없는 파라미터 |
+| 400 | `KEY_MISSING` | 고른 판단 모델·리뷰어의 API 키가 없음 (detail `keys`: 키 이름 목록, ADR 0032) |
 | 401 | `UNAUTHORIZED` | 토큰 없음·만료 |
 | 403 | `CONFIRMATION_REQUIRED` | 실전 전환·키 변경에 2차 확인 필요 |
 | 404 | `NOT_FOUND` | 전략·주문 없음 |
@@ -32,16 +33,16 @@ FastAPI, base `/api/v1`. 인증은 `Authorization: Bearer <JWT>` (단일 사용�
 | --- | --- | --- |
 | GET | `/health` | `{ok, version, paper, env, engine_alive, ws_connected:{upbit,kis}, halted:{upbit,krx,us}, live_markets:["upbit"]}` — `live_markets`는 실시간 엔진이 도는 시장 (ADR 0031) |
 | POST | `/auth/login` | `{password}` → `{token, expires_at}` |
-| GET | `/settings` | settings 테이블 전체 + RiskRules(읽기 전용, `locked:true`) |
-| PATCH | `/settings` | `{key: value, ...}` — 허용 키만: `gate.*`, `judge.provider`, `llm.models`, `news.enabled`, `notify.*` |
+| GET | `/settings` | settings 테이블 전체 + RiskRules(읽기 전용, `locked:true`) + `judge`: 지금 유효한 AI 판단 설정 `{provider, llm_models, hold_below, full_above, keys:{typesafe, claude, gemini}, active}`. 저장값이 없으면 환경변수 값, `keys`는 키 유무(true/false)만, `active`는 엔진이 실제로 쓰는 `{provider, llm_models, ts}`(`engine.judge.upbit`, 없으면 null) (ADR 0032) |
+| PATCH | `/settings` | `{key: value, ...}` — 허용 키만: `gate.*`, `judge.provider`, `llm.models`, `news.enabled`, `notify.*`. `gate.*`는 엔진이 하트비트(5초)마다 읽어 바로 반영, `judge.provider`·`llm.models`는 엔진 재시작 때 적용. 연결되지 않은 `laya`는 400 `INVALID_PARAM`, 키가 없는 모델은 400 `KEY_MISSING` (ADR 0032) |
 
 ### 2.2 전략
 
 | 메서드 | 경로 | 설명 |
 | --- | --- | --- |
-| GET | `/strategies` | 등록 전략 + 설정 병합: `[{name, market, timeframe, horizon, symbols, params, schema, enabled, allocation, paper, status:{position, month_pnl, mdd_30d}, gate:{...}}]`. `month_pnl`은 월초(시장 현지) 이후 전략 손익률, `mdd_30d`는 최근 30일 최대 낙폭(양수 비율). 전략 체결 재생 + 1시간 종가 평가, 자본 기준은 allocation × 월초 평가액(없으면 초기 자금). 해당 기간 체결이나 시세가 없으면 null (ADR 0020) |
+| GET | `/strategies` | 등록 전략 + 설정 병합: `[{name, market, timeframe, horizon, symbols, params, schema, enabled, allocation, paper, status:{position, month_pnl, mdd_30d}, gate:{...}}]`. 설정 행이 없으면 권장 조합 기본값(변동성 돌파 켜짐·0.15, GEM 꺼짐·0.40, GTAA 꺼짐·0.35, ORB 꺼짐·0) — 엔진도 같은 값을 쓴다 (ADR 0032). `month_pnl`은 월초(시장 현지) 이후 전략 손익률, `mdd_30d`는 최근 30일 최대 낙폭(양수 비율). 전략 체결 재생 + 1시간 종가 평가, 자본 기준은 allocation × 월초 평가액(없으면 초기 자금). 해당 기간 체결이나 시세가 없으면 null (ADR 0020) |
 | GET | `/strategies/{name}` | 단일 |
-| PATCH | `/strategies/{name}` | `{enabled?, params?, allocation?, symbols?}` — params는 ParamSpec 검증, allocation 합 ≤ 1, intraday 합 ≤ 0.2 |
+| PATCH | `/strategies/{name}` | `{enabled?, params?, allocation?, symbols?}` — params는 ParamSpec 검증, allocation 합 ≤ 1, intraday 합 ≤ 0.2 (설정 행이 없는 전략은 기본 배분으로 합에 들어간다). 엔진은 하트비트마다 enabled·allocation·params를 읽는다: 꺼짐·배분 0은 진입만 막고, 사이징은 평가액 × allocation. symbols는 시세 구독 범위라 엔진에 아직 반영하지 않는다 (ADR 0032) |
 | POST | `/strategies/{name}/reset-params` | 기본값 복원 |
 | POST | `/strategies/{name}/go-live` | 페이퍼 → 실전. 관문 미통과면 409 `GATE_LOCKED` + `{missing:[...]}`. 통과 시 403 `CONFIRMATION_REQUIRED` → `{confirm_password}` 재요청 |
 | POST | `/strategies/{name}/go-paper` | 실전 → 페이퍼 (즉시, 확인 불필요. 보유 포지션은 유지하고 신규 진입만 페이퍼) |

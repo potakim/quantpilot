@@ -2,6 +2,8 @@
 
 불변식 #6: RiskRules는 읽기 전용(`locked: true`)으로만 보여 주고, PATCH는 허용 키만 받는다.
 불변식 #10: 키 값은 파일에 쓰기만 하고 응답·로그에 싣지 않는다. 비밀번호·JWT 시크릿도 마찬가지.
+AI 판단 설정(ADR 0032): 임계값은 엔진이 바로 읽고, 판단 모델·리뷰어는 엔진 재시작 때 적용된다. 키가 없거나
+배선되지 않은 모델은 저장하지 않는다. 키는 있는지 여부만 본다.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from quantpilot.api.auth import require_user
 from quantpilot.api.deps import Deps, DepsDep
 from quantpilot.api.errors import ApiError
 from quantpilot.core.models import LIVE_MARKETS, Market
-from quantpilot.engine.link import SettingsEngineLink
+from quantpilot.engine.link import SettingsEngineLink, active_judge_key
 from quantpilot.execution.risk import RiskRules
 from quantpilot.realtime import keys as hk
 
@@ -33,6 +35,13 @@ router = APIRouter(dependencies=[Depends(require_user)])
 HEARTBEAT_STALE = timedelta(seconds=90)
 JUDGE_PROVIDERS = ("stub", "typesafe", "laya")
 LLM_MODELS = ("claude", "gemini", "stub")
+UNWIRED_PROVIDERS = frozenset({"laya"})  # 저장은 받지 않는다 — build_pipeline이 거부한다 (ADR 0032)
+# 판단 모델·리뷰어 → 필요한 키 이름 (stub은 키 없음)
+MODEL_KEYS = {
+    "typesafe": "typesafe_api_key",
+    "claude": "anthropic_api_key",
+    "gemini": "google_api_key",
+}
 SECRET_WORDS = ("key", "secret", "token", "password")
 # POST /settings/keys로 받을 수 있는 이름 = config.Settings의 외부 키 필드 (QP_<NAME>)
 KEY_NAMES = frozenset(
@@ -129,15 +138,45 @@ async def all_settings(deps: Deps) -> dict[str, Any]:
     return {r.key: ("***" if _is_secret_name(r.key) else r.value) for r in rows}
 
 
+def has_key(deps: Deps, name: str) -> bool:
+    """키가 환경변수나 키 파일(재시작 뒤 적용, ADR 0017)에 있는가. 값은 보지 않고 있는지만."""
+    if getattr(deps.settings, name, ""):
+        return True
+    path = Path(deps.settings.keys_file)
+    if not path.exists():
+        return False
+    prefix = f"QP_{name.upper()}="
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return any(ln.startswith(prefix) and ln[len(prefix) :].strip() for ln in lines)
+
+
+async def judge_view(deps: Deps) -> dict[str, Any]:
+    """지금 유효한 AI 판단 설정(저장값 > 환경변수) + 키 유무 + 엔진이 실제로 쓰는 모델 (ADR 0032)."""
+    from quantpilot.db.repo import SqlConfigRepo
+    from quantpilot.judgment.overrides import effective, judge_overrides
+
+    config = SqlConfigRepo(deps.sessions)
+    eff = effective(deps.settings, await judge_overrides(config))
+    return {
+        "provider": eff.judge_provider,
+        "llm_models": list(eff.llm_providers),
+        "hold_below": float(eff.gate_hold_below),
+        "full_above": float(eff.gate_full_above),
+        "keys": {m: has_key(deps, k) for m, k in MODEL_KEYS.items()},
+        "active": await config.get_setting(active_judge_key(Market.UPBIT)),
+    }
+
+
 @router.get("/settings")
 async def get_settings(
     deps: DepsDep,
 ) -> dict[str, Any]:
-    """settings + RiskRules(읽기 전용)."""
+    """settings + RiskRules(읽기 전용) + 유효 AI 판단 설정."""
     return {
         "settings": await all_settings(deps),
         "risk_rules": {**asdict(RiskRules()), "locked": True},
         "paper": bool(deps.settings.paper),
+        "judge": await judge_view(deps),
     }
 
 
@@ -184,6 +223,7 @@ async def patch_settings(
     if not patch:
         raise ApiError(400, "INVALID_PARAM", "바꿀 키가 없다")
     clean = {k: validate_setting(k, v) for k, v in patch.items()}
+    _check_models(deps, clean)
     config = SqlConfigRepo(deps.sessions)
     hold = clean.get("gate.hold_below", await config.get_setting("gate.hold_below"))
     full = clean.get("gate.full_above", await config.get_setting("gate.full_above"))
@@ -195,6 +235,21 @@ async def patch_settings(
         await config.set_setting(k, v)
     log.info("settings patched", extra={"keys": sorted(clean)})
     return {"updated": sorted(clean)}
+
+
+def _check_models(deps: Deps, clean: dict[str, Any]) -> None:
+    """재시작한 엔진이 쓸 수 없는 판단 모델·리뷰어는 저장하지 않는다 (ADR 0032)."""
+    provider = clean.get("judge.provider")
+    if provider in UNWIRED_PROVIDERS:
+        raise ApiError(400, "INVALID_PARAM", f"{provider}는 아직 연결되지 않은 판단 모델이다")
+    wanted = ([provider] if provider else []) + list(clean.get("llm.models") or [])
+    missing = sorted(
+        {MODEL_KEYS[m] for m in wanted if m in MODEL_KEYS and not has_key(deps, MODEL_KEYS[m])}
+    )
+    if missing:
+        raise ApiError(
+            400, "KEY_MISSING", "이 모델을 쓰려면 API 키를 먼저 등록해야 한다", {"keys": missing}
+        )
 
 
 class KeysRequest(BaseModel):

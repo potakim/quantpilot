@@ -1,6 +1,7 @@
 """03 §2.2 전략: 목록·단일·설정 변경·기본값 복원·실전/페이퍼 전환.
 
-전략 코드(REGISTRY)와 DB 설정(strategy_configs)을 합쳐 보여 준다. 설정 행이 없으면 기본값·비활성.
+전략 코드(REGISTRY)와 DB 설정(strategy_configs)을 합쳐 보여 준다. 설정 행이 없으면 권장 조합 기본값
+(`strategies.DEFAULT_CONFIG`, ADR 0032) — 엔진도 같은 값을 쓴다.
 allocation 합 ≤ 1, intraday 합 ≤ 0.2 (RiskRules.max_intraday_weight와 같은 값, 더 느슨하게 못 둔다).
 """
 
@@ -20,7 +21,7 @@ from quantpilot.api.errors import ApiError
 from quantpilot.core import clock
 from quantpilot.core.models import Market
 from quantpilot.execution.risk import RiskRules
-from quantpilot.strategies import REGISTRY, create
+from quantpilot.strategies import REGISTRY, create, strategy_config
 from quantpilot.strategies.base import Strategy
 
 log = logging.getLogger(__name__)
@@ -78,7 +79,7 @@ async def _market_stats(
         by.setdefault(f.strategy, []).append(f)
     out = {}
     for name, fs in by.items():
-        alloc = float((rows.get(name) or {}).get("allocation") or 0.0)
+        alloc = strategy_config(name, rows.get(name))["allocation"] if name in REGISTRY else 0.0
         out[name] = metrics.strategy_stats(fs, prices, alloc * base, month_start=month0, now=now)
     return out
 
@@ -95,8 +96,8 @@ async def _view(
     if stats is None:
         stats = await _market_stats(deps, cls.market, {name: row or {}})
     st = stats.get(name) or {}
-    row = row or {}
-    strat = _instance(cls, row.get("params") or {})
+    cfg = strategy_config(name, row)
+    strat = _instance(cls, cfg["params"])
     d = strat.describe()
     positions = [
         p for p in await SqlPositionRepo(deps.sessions).all(cls.market) if p.strategy == name
@@ -104,10 +105,10 @@ async def _view(
     g1 = await gates.g1_for(deps, name)
     d.update(
         {
-            "symbols": list(row.get("symbols") or d["symbols"]),
-            "enabled": bool(row.get("enabled", False)),
-            "allocation": float(row.get("allocation") or 0.0),
-            "paper": bool(row.get("paper", True)),
+            "symbols": cfg["symbols"],
+            "enabled": cfg["enabled"],
+            "allocation": cfg["allocation"],
+            "paper": cfg["paper"],
             "status": {
                 "position": {p.symbol: p.qty for p in positions},
                 "month_pnl": st.get("month_pnl"),
@@ -156,14 +157,7 @@ async def _save(deps: Deps, name: str, row: dict[str, Any], **changes: Any) -> N
     from quantpilot.db.repo import SqlConfigRepo
 
     cls = _cls(name)
-    merged = {
-        "allocation": float(row.get("allocation") or 0.0),
-        "symbols": list(row.get("symbols") or cls.symbols),
-        "params": dict(row.get("params") or {}),
-        "enabled": bool(row.get("enabled", False)),
-        "paper": bool(row.get("paper", True)),
-        **changes,
-    }
+    merged = {**strategy_config(name, row), **changes}
     await SqlConfigRepo(deps.sessions).upsert_strategy(name=name, market=cls.market, **merged)
 
 
@@ -191,7 +185,7 @@ async def patch_strategy(
     if req.allocation is not None:
         if not 0.0 <= req.allocation <= 1.0:
             raise ApiError(400, "INVALID_PARAM", "allocation은 0~1")
-        alloc = {n: float(r.get("allocation") or 0.0) for n, r in rows.items() if n in REGISTRY}
+        alloc = {n: strategy_config(n, rows.get(n))["allocation"] for n in REGISTRY}
         alloc[name] = req.allocation
         if sum(alloc.values()) > 1.0 + 1e-9:
             raise ApiError(

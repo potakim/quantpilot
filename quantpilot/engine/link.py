@@ -9,6 +9,10 @@ engine과 scheduler는 다른 프로세스다. Redis 허브(P1-12) 전까지 둘
   엔진은 하트비트 때마다 읽어서 RiskManager.halted_reason에 반영한다.
 - `engine.prescreen.<market>` = {"day", "blocked": {symbol: 사유}, "ts"}. 08:10 사전 심사 결과
   (ADR 0004·0022). scheduler만 쓰고, 엔진은 하트비트 때마다 읽어 판단 파이프라인에 넘긴다.
+- `engine.judge.<market>` = {"provider", "llm_models", "ts"}. 엔진이 시작할 때 실제로 쓰는 판단 모델·리뷰어를
+  쓴다. 화면은 저장한 설정과 다르면 "재시작 후 적용"을 보여 준다 (ADR 0032).
+
+전략 설정(strategy_configs)과 AI 판단 설정(`gate.*`·`judge.provider`·`llm.models`)은 API가 쓰고 엔진이 읽기만 한다.
 
 전략마다 키가 따로라서 한 키를 두 프로세스가 동시에 고치지 않는다(명령은 scheduler만, ack는 처리한 쪽만).
 """
@@ -142,6 +146,25 @@ class SettingsEngineLink:
         """마지막으로 쓴 처리 표시 {day, entered, exited}. 없으면 None."""
         return await self.config.get_setting(self._done_key(market))
 
+    async def strategy_configs(self, market: Market) -> dict[str, dict[str, Any]]:
+        """그 시장의 저장된 전략 설정 행 {이름: 행}. 기본값 병합은 엔진이 한다 (ADR 0032)."""
+        return {r["name"]: r for r in await self.config.strategies(market)}
+
+    async def judge_overrides(self) -> dict[str, Any]:
+        """settings 표에 저장된 AI 판단 설정 {Settings 필드: 값} (ADR 0032)."""
+        from quantpilot.judgment.overrides import judge_overrides
+
+        return await judge_overrides(self.config)
+
+    async def set_active_judge(self, market: Market, provider: str, llm_models: list[str]) -> None:
+        """엔진이 실제로 쓰는 판단 모델·리뷰어를 기록한다 (화면의 "재시작 후 적용" 표시용)."""
+        value = {
+            "provider": provider,
+            "llm_models": list(llm_models),
+            "ts": self.utcnow().isoformat(),
+        }
+        await self.config.set_setting(active_judge_key(market), value)
+
     async def month_start(self, market: Market) -> dict[str, Any] | None:
         """scheduler month_roll이 저장한 월초 평가액 {month: "YYYY-MM", equity}. 없으면 None."""
         return await self.config.get_setting(month_start_key(market))
@@ -150,3 +173,8 @@ class SettingsEngineLink:
 def month_start_key(market: Market) -> str:
     """settings에 월초 평가액을 두는 키 (scheduler month_roll이 쓰고 엔진·API가 읽는다)."""
     return f"month_start_equity.{Market(market).value}"
+
+
+def active_judge_key(market: Market) -> str:
+    """엔진이 쓰는 판단 모델·리뷰어를 두는 settings 키 (ADR 0032)."""
+    return f"engine.judge.{Market(market).value}"

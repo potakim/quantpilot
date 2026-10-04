@@ -4,6 +4,7 @@
 EngineLink가 있으면 타이머가 link_every초마다 하트비트를 쓰고, scheduler가 넣은 시간 청산 명령을
 TickRunner.on_time_exit로 실행한 뒤 ack한다 (04 §8). 수동 주문 큐(ManualOrderConsumer, ADR 0017)도
 같은 타이머에서 비운다. 이벤트는 HubBus로 허브(Redis pub/sub) → api WS 허브 → 화면에 간다 (P1-12).
+전략 설정(켜기/끄기·배분·파라미터)과 확신도 임계값도 시작 직후와 하트비트마다 읽어 반영한다 (ADR 0032).
 
 같은 구간의 봉은 심볼마다 확정 시점이 다르다(다음 체결이 먼저 오면 즉시, 아니면 마감 + grace 타이머).
 여러 심볼을 보는 전략이 한 시각에 한 번만 평가되도록, 확정된 봉은 그 구간의 마감 + grace까지 모았다가
@@ -147,6 +148,8 @@ class MarketEngine:
                     risk.month_start_equity = float(ms["equity"])
                     risk._month = (now.year, now.month)
             done = await self.link.done(market)
+            await self._sync_configs(market)
+            await self._sync_gate()
         self.runner.restore_state(now, done)
         log.info("engine state restored", extra={"market": market.value})
 
@@ -174,6 +177,8 @@ class MarketEngine:
         await self._sync_done(market, now)
         await self._sync_halt(market)
         await self._sync_prescreen(market)
+        await self._sync_configs(market)
+        await self._sync_gate()
         for s in self.runner.strategies:
             cmd_id = await self.link.pending_time_exit(market, s.name)
             if cmd_id is None:
@@ -181,6 +186,36 @@ class MarketEngine:
             log.info("time_exit 명령 처리", extra={"strategy": s.name, "cmd": cmd_id})
             await self.runner.on_time_exit(s.name)
             await self.link.ack_time_exit(market, s.name, cmd_id)
+
+    async def _sync_configs(self, market) -> None:
+        """저장된 전략 설정을 기본값과 합쳐 TickRunner에 넘긴다 (ADR 0032)."""
+        from quantpilot.strategies import strategy_config
+
+        apply = getattr(self.runner, "apply_configs", None)
+        if apply is None:
+            return
+        rows = await self.link.strategy_configs(market)
+        apply({s.name: strategy_config(s.name, rows.get(s.name)) for s in self.runner.strategies})
+
+    async def _sync_gate(self) -> None:
+        """저장된 확신도 임계값을 판단 파이프라인에 바로 반영한다. 게이팅 OFF(스텁)면 할 일 없음 (ADR 0032)."""
+        from quantpilot.judgment.overrides import valid_gate
+
+        pipeline = getattr(self.runner, "pipeline", None)
+        if not hasattr(pipeline, "hold_below"):
+            return
+        ov = await self.link.judge_overrides()
+        hold = ov.get("gate_hold_below", pipeline.hold_below)
+        full = ov.get("gate_full_above", pipeline.full_above)
+        if (hold, full) == (pipeline.hold_below, pipeline.full_above):
+            return
+        if not valid_gate(hold, full):
+            log.warning(
+                "확신도 임계값이 범위 밖이라 무시", extra={"hold_below": hold, "full_above": full}
+            )
+            return
+        pipeline.hold_below, pipeline.full_above = float(hold), float(full)
+        log.info("확신도 임계값 반영", extra={"hold_below": hold, "full_above": full})
 
     async def _sync_done(self, market, now: datetime) -> None:
         """바뀐 오늘 처리 표시를 우편함에 쓴다 — 재시작 뒤 같은 날 다시 사지 않게 (ADR 0028)."""
@@ -234,14 +269,24 @@ class MarketEngine:
             tg.create_task(timer())
 
 
+def upbit_strategies() -> tuple[str, ...]:
+    """업비트에 등록된 전략 전부. 켜기/끄기는 전략 설정으로 정한다 (ADR 0032)."""
+    from quantpilot.strategies import REGISTRY
+
+    return tuple(n for n, cls in REGISTRY.items() if cls.market == Market.UPBIT)
+
+
 def build_upbit_paper(
-    strategy_names: Sequence[str] = ("vol_breakout",),
+    strategy_names: Sequence[str] | None = None,
     *,
     sessions: Sessions | None = None,
     hub: Hub | None = None,
     daily_seed: Mapping[str, pd.DataFrame] | None = None,
+    judge_settings: object | None = None,
 ) -> MarketEngine:
     """업비트 페이퍼 엔진 배선. 판단 파이프라인은 settings.judge_provider로 고른다 (stub이면 게이팅 OFF).
+
+    judge_settings를 주면 판단 파이프라인만 그 설정(settings 표 덮어쓰기, ADR 0032)으로 만든다.
 
     게이팅 OFF 섀도 원장(06 §6.2)을 항상 함께 둔다: 같은 신호·같은 시세·같은 규칙, 배수 1.0.
 
@@ -266,7 +311,7 @@ def build_upbit_paper(
             "실계좌 배선은 P1-05 OrderExecutor 이후. 지금은 settings.paper=True만 허용"
         )
     market = Market.UPBIT
-    strategies = [create(n) for n in strategy_names]
+    strategies = [create(n) for n in (strategy_names or upbit_strategies())]
     risk = RiskManager()
     clock = MarketClock(market)
     cost = preset(market)
@@ -333,7 +378,7 @@ def build_upbit_paper(
         market,
         strategies,
         features,
-        build_pipeline(settings, bus=bus),
+        build_pipeline(judge_settings or settings, bus=bus),
         executor,
         risk,
         clock,
@@ -400,19 +445,48 @@ def main() -> None:
     logging.getLogger().addHandler(CriticalLogHandler(from_settings(settings)))  # 청산 실패 등
     from quantpilot.strategies import create
 
-    symbols = sorted({s for name in ("vol_breakout",) for s in create(name).symbols})
-    engine = build_upbit_paper(
-        sessions=make_sessions(settings.db_url),
-        hub=make_hub(settings),
-        daily_seed=fetch_daily_seed(symbols),
-    )
-    stream = UpbitStream(symbols, on_trade=engine.on_trade)
+    symbols = sorted({s for name in upbit_strategies() for s in create(name).symbols})
 
     async def _run() -> None:
+        sessions = make_sessions(settings.db_url)
+        engine = await _build_with_overrides(
+            sessions, make_hub(settings), fetch_daily_seed(symbols)
+        )
+        stream = UpbitStream(symbols, on_trade=engine.on_trade)
         await engine.restore()
         await engine.run(stream)
 
     asyncio.run(_run())
+
+
+async def _build_with_overrides(
+    sessions: Sessions, hub: Hub, daily_seed: Mapping[str, pd.DataFrame]
+) -> MarketEngine:
+    """settings 표의 판단 모델·리뷰어로 엔진을 만든다 (ADR 0032).
+
+    덮어쓴 설정으로 만들지 못하면 환경변수 설정으로 되돌리고 CRITICAL을 남긴다 — 재시작을 되풀이하지 않게.
+    실제로 쓰는 판단 모델·리뷰어는 우편함(`engine.judge.<market>`)에 기록한다.
+    """
+    from quantpilot.config import settings
+    from quantpilot.db.repo import SqlConfigRepo
+    from quantpilot.engine.link import SettingsEngineLink
+    from quantpilot.judgment.overrides import effective
+
+    link = SettingsEngineLink(SqlConfigRepo(sessions))
+    judge = effective(settings, await link.judge_overrides())
+    try:
+        engine = build_upbit_paper(
+            sessions=sessions, hub=hub, daily_seed=daily_seed, judge_settings=judge
+        )
+    except Exception as e:  # noqa: BLE001 — 저장된 설정 오류로 엔진이 멈추면 청산도 멈춘다
+        log.critical(
+            "저장된 AI 판단 설정으로 엔진을 만들지 못해 환경변수 설정으로 시작한다",
+            extra={"provider": judge.judge_provider, "error": type(e).__name__},
+        )
+        judge = settings
+        engine = build_upbit_paper(sessions=sessions, hub=hub, daily_seed=daily_seed)
+    await link.set_active_judge(Market.UPBIT, judge.judge_provider, list(judge.llm_providers))
+    return engine
 
 
 if __name__ == "__main__":

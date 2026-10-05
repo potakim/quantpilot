@@ -34,6 +34,17 @@ log = logging.getLogger(__name__)
 
 TICK_MIN_INTERVAL = 0.25  # 초당 최대 4건
 PORTFOLIO_MIN_INTERVAL = 5.0
+ORDERBOOK_DEPTH = 5  # 화면 호가 단계 (03 §3)
+ORDERBOOK_TTL = 10.0  # 허브 ob 키 유효 시간 (02 §5) — 시세가 끊기면 10초 뒤 화면이 "호가 없음"으로
+
+
+def orderbook_payload(snapshot: Any, depth: int = ORDERBOOK_DEPTH) -> dict[str, list[list[float]]]:
+    """호가 스냅샷(levels[0] = 최우선) → 화면 모양 {asks: [[가격, 수량]…], bids: [[가격, 수량]…]}."""
+    levels = list(snapshot.levels)[:depth]
+    return {
+        "asks": [[lv.ask_price, lv.ask_size] for lv in levels],
+        "bids": [[lv.bid_price, lv.bid_size] for lv in levels],
+    }
 
 
 def _utc(ts: datetime, market: Market | None) -> datetime:

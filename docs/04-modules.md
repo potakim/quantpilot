@@ -151,6 +151,9 @@ class TickRunner:
   - 사이징 기준은 평가액 × allocation이고, 리스크 검사에는 계좌 전체 평가액을 넘긴다. 꺼졌거나 allocation 0인 전략은 진입 target만 버리고(판단 모델 호출 없음) 청산·손절·시간 청산은 처리한다. params가 바뀌면 전략을 다시 만든다.
   - 확신도 임계값(`gate.*`)은 하트비트마다 판단 파이프라인에 반영한다. 판단 모델·리뷰어(`judge.provider`·`llm.models`)는 시작할 때 settings 표 값을 환경변수 위에 덮어써 만들고, 실제로 쓰는 값을 `engine.judge.<market>`에 기록한다. 덮어쓴 값으로 만들지 못하면 환경변수 설정으로 시작하고 CRITICAL을 남긴다.
   - `apply_configs`를 부르지 않는 백테스트는 모든 전략이 켜짐·배분 1.0이다.
+- 화면 표시 (허브가 있을 때만, 실패해도 매매는 계속):
+  - 하트비트마다 바뀐 전략 상태를 WS `strategy.status`로 보낸다 (ADR 0034).
+  - 타이머(1초)마다 `UpbitStream`이 받은 호가 중 바뀐 종목만 허브 `ob:{market}:{symbol}`(TTL 10초)와 WS `orderbook:{market}:{symbol}`로 보낸다(`{asks, bids}` 5단계, 02 §5·03 §3). 같은 스냅샷은 다시 쓰지 않으므로 시세가 끊기면 10초 뒤 호가가 사라진다.
 - 실시간 페이퍼 엔진(`engine/main.py::build_upbit_paper`)의 피처 빌더는 `features/builder.py::FeatureBuilder`다. 뉴스는 `NewsRefresher`가 엔진 타이머에서 DB `news_items`를 5분마다 `NewsCache`로 옮기고, 이벤트는 `QP_EVENTS_FILE` YAML + DART 위험 공시다 (ADR 0021). 판단 모델이 `stub`이면 뉴스는 판단 로그에만 남고 사이징은 바뀌지 않는다.
 - 백테스터는 이 `TickRunner`를 `PaperBroker` + `DirectExecutor` + `StubPipeline(StubJudge, gating=False)` + `ReplayClock` + `UnrestrictedRisk`(기본, `apply_risk=True`면 `RiskManager`)로 돌린다. 0단계 `Backtester.run`의 인라인 루프는 제거했다. 배선 결정과 0단계 대비 수치 차이는 ADR 0010.
 

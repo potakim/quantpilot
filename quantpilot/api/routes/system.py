@@ -164,6 +164,8 @@ async def judge_view(deps: Deps) -> dict[str, Any]:
         "full_above": float(eff.gate_full_above),
         "keys": {m: has_key(deps, k) for m, k in MODEL_KEYS.items()},
         "active": await config.get_setting(active_judge_key(Market.UPBIT)),
+        # Gemini 뉴스 요약 (ADR 0035): false면 scheduler가 제목 요약을 쓴다. 저장값이 없으면 켜짐
+        "news_summary": await config.get_setting("news.enabled") is not False,
     }
 
 

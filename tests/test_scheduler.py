@@ -473,13 +473,13 @@ async def test_news_collect_calls_collector():
     got = []
 
     class Collector:
-        async def collect(self, now):
-            got.append(now)
+        async def collect(self, now, *, summarizer=None):
+            got.append((now, summarizer))
             return [1, 2]
 
     now = Now()
     await data.news_collect(_ctx(now, news=Collector()))
-    assert got == [T0]
+    assert got == [(T0, None)]  # news.enabled 저장값 없음 → 주입된 요약기 그대로 (ADR 0035)
 
 
 async def test_daily_review_saves_stats_and_notifies(sessions):

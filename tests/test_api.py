@@ -260,6 +260,7 @@ async def test_get_settings_reports_effective_judge_config(ctx):
         "full_above": 0.9,
         "keys": {"typesafe": False, "claude": False, "gemini": False},
         "active": None,
+        "news_summary": True,  # news.enabled 저장값 없음 = 켜짐 (ADR 0035)
     }
     config = SqlConfigRepo(ctx.sessions)
     await config.set_setting("gate.hold_below", 0.6)

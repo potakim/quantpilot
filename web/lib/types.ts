@@ -331,6 +331,8 @@ export interface JudgeView {
   full_above: number;
   keys: Record<string, boolean>;
   active: { provider: string; llm_models: string[]; ts?: string } | null;
+  /** Gemini 뉴스 요약 (news.enabled, ADR 0035). false면 다음 정시 수집부터 제목 요약 */
+  news_summary: boolean;
 }
 
 export interface SettingsView {

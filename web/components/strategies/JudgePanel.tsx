@@ -2,6 +2,7 @@
 
 // AI 판단 설정 (Strategy.dc.html 오른쪽 아래). 임계값은 엔진이 5초 안에 읽고, 판단 모델·리뷰어는 엔진을
 // 다시 켤 때 적용된다 (ADR 0032). 키가 없는 모델은 고를 수 없다 — API도 KEY_MISSING으로 거부한다.
+// 뉴스 요약(Gemini Flash-Lite, news.enabled)은 다음 정시 수집부터 적용되고, 끄면 제목만 요약한다 (ADR 0035).
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { IconSparkle } from "@/components/ui/Icons";
@@ -10,12 +11,13 @@ import { Badge, Card, CardSkeleton, ErrorNote } from "@/components/ui/primitives
 import { apiFetch, reasonText } from "@/lib/api";
 import { fmtNumber, fmtUsd } from "@/lib/format";
 import { useCostsAi, useSettings } from "@/lib/queries";
-import { llmModels, restartPending } from "@/lib/strategy";
+import { judgeSavedNote, llmModels, restartPending } from "@/lib/strategy";
 
 interface Draft {
   provider?: string;
   claude?: boolean;
   gemini?: boolean;
+  news?: boolean;
   hold?: number;
   full?: number;
 }
@@ -50,6 +52,7 @@ export function JudgePanel() {
   const provider = draft.provider ?? j.provider;
   const claude = draft.claude ?? j.llm_models.includes("claude");
   const gemini = draft.gemini ?? j.llm_models.includes("gemini");
+  const news = draft.news ?? j.news_summary;
   const hold = draft.hold ?? j.hold_below;
   const full = draft.full ?? j.full_above;
   const models = llmModels(claude, gemini);
@@ -58,6 +61,7 @@ export function JudgePanel() {
   if (JSON.stringify(models) !== JSON.stringify(j.llm_models)) patch["llm.models"] = models;
   if (hold !== j.hold_below) patch["gate.hold_below"] = hold;
   if (full !== j.full_above) patch["gate.full_above"] = full;
+  if (news !== j.news_summary) patch["news.enabled"] = news;
   const changed = Object.keys(patch).length > 0;
   const badGate = hold >= full;
   const keyNote = (has: boolean | undefined) => (has ? "키 등록됨" : "키 필요");
@@ -149,8 +153,16 @@ export function JudgePanel() {
           title="Gemini 3.5 Flash"
           meta={j.keys.gemini ? "진입 합의" : keyNote(false)}
         />
+        <CheckRow
+          checked={news}
+          onChange={(v) => set({ news: v })}
+          disabled={!j.keys.gemini && !news}
+          title="Gemini 3.5 Flash-Lite"
+          meta={j.keys.gemini ? "뉴스 요약 · 1시간" : keyNote(false)}
+        />
         <p className="text-[11px] leading-relaxed text-muted">
-          끈 자리는 스텁 리뷰어가 채웁니다. 키는 설정 · API 키 화면에서 등록합니다.
+          끈 자리는 스텁 리뷰어가 채웁니다. 뉴스 요약을 끄면 제목만 저장해 판단 모델이 읽습니다(다음 정시부터). 키는
+          설정 · API 키 화면에서 등록합니다.
         </p>
       </fieldset>
 
@@ -163,10 +175,7 @@ export function JudgePanel() {
       {save.isError ? <ErrorNote>{reasonText(save.error)}</ErrorNote> : null}
       {saved ? (
         <p role="status" className="text-[11px] text-ok-ink">
-          저장했습니다.{" "}
-          {saved.some((k) => k === "judge.provider" || k === "llm.models")
-            ? "판단 모델·리뷰어는 엔진을 다시 켜면 적용됩니다."
-            : "엔진이 5초 안에 반영합니다."}
+          저장했습니다. {judgeSavedNote(saved)}
         </p>
       ) : null}
       <Button variant="primary" disabled={!changed || badGate || save.isPending} onClick={() => save.mutate(patch)}>

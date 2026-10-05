@@ -16,11 +16,20 @@ HORIZON = timedelta(hours=24)
 
 
 async def news_collect(ctx: JobContext) -> None:
-    """매시 :05: 뉴스 수집·요약 (data.news.NewsCollector)."""
+    """매시 :05: 뉴스 수집·요약 (data.news.NewsCollector).
+
+    settings `news.enabled`가 false면 그 회차는 Gemini 대신 제목 요약으로 요약한다 — 수집·저장은 그대로라
+    엔진은 계속 뉴스 제목을 받는다 (ADR 0035).
+    """
     if ctx.news is None:
         return
-    items = await ctx.news.collect(ctx.utcnow())
-    log.info("news collected", extra={"count": len(items)})
+    summarizer = None
+    if ctx.config is not None and await ctx.config.get_setting("news.enabled") is False:
+        from quantpilot.data.news import TitleSummarizer
+
+        summarizer = TitleSummarizer()
+    items = await ctx.news.collect(ctx.utcnow(), summarizer=summarizer)
+    log.info("news collected", extra={"count": len(items), "llm_summary": summarizer is None})
 
 
 async def _close_at(ctx: JobContext, market: Market, symbol: str, ts: datetime) -> float | None:

@@ -5,6 +5,7 @@ import {
   allocationSummary,
   formatParam,
   g1Summary,
+  judgeSavedNote,
   llmModels,
   orderStrategies,
   paramControls,
@@ -143,7 +144,16 @@ describe("AI 판단 설정", () => {
     full_above: 0.9,
     keys: { typesafe: false, claude: false, gemini: false },
     active: { provider: "stub", llm_models: ["stub", "stub"] },
+    news_summary: true,
     ...over,
+  });
+
+  it("저장 안내는 키마다 적용 시점을 알린다 (ADR 0032·0035)", () => {
+    expect(judgeSavedNote(["news.enabled"])).toBe("뉴스 요약은 다음 정시 수집부터 적용됩니다.");
+    expect(judgeSavedNote(["gate.hold_below"])).toBe("임계값은 엔진이 5초 안에 반영합니다.");
+    expect(judgeSavedNote(["llm.models", "news.enabled"])).toBe(
+      "판단 모델·리뷰어는 엔진을 다시 켜면 적용됩니다. 뉴스 요약은 다음 정시 수집부터 적용됩니다.",
+    );
   });
 
   it("리뷰어는 늘 2개 (불변식 #8), 끈 자리는 stub", () => {

@@ -173,7 +173,7 @@ APScheduler(AsyncIOScheduler), 잡은 DB에 영속(`SQLAlchemyJobStore`).
 | `kis_token_refresh` | 08:00 | 토큰 재발급, 실패 시 국내·미국 휴무 플래그 |
 | `upbit_prescreen` | 08:10 | 대상 코인별 판단 모델 + LLM 리뷰어 전원 승인 사전 심사 → 당일 제외 목록을 settings 우편함 `engine.prescreen.upbit`에 (ADR 0004·0022, `scheduler/wiring.py::Prescreen`) |
 | `morning_brief` | 08:30 | Claude 아침 브리핑 알림: 일정·보유·리스크 |
-| `news_collect` | 매시 :05 | 뉴스 수집·요약 |
+| `news_collect` | 매시 :05 | 뉴스 수집·요약 (settings `news.enabled=false`면 그 회차는 제목 요약 — ADR 0035) |
 | `fill_realized_24h` | 매시 :10 | `judgments.realized_ret_24h` 채우기 |
 | `daily_review` | 20:30 | Claude 사후 리뷰 → `daily_reviews`, 알림 |
 | `equity_snapshot` | 매분 | `equity_snapshots` |

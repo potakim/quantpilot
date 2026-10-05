@@ -38,35 +38,53 @@ class VolBreakout(Strategy):
             ParamSpec("max_weight", 1.0, 0.1, 1.0, 0.1, description="코인 하나의 최대 비중"),
         ]
 
+    def _levels(self, ctx: Context, sym: str) -> tuple[float, float, float, float] | None:
+        """(K, 목표가, 이평 스코어, 전일 변동폭) — 웜업 전이면 None. on_bar와 state가 같이 쓴다."""
+        if sym not in ctx.bars:
+            return None
+        prev = ctx.prev(sym)
+        if len(prev) < self.warmup_bars:
+            return None
+        p1 = prev.iloc[-1]
+        rng = float(p1["high"] - p1["low"])
+
+        k = float(self.params["k"])
+        if self.params["noise_k"]:
+            noise = 1 - (prev["open"] - prev["close"]).abs() / (prev["high"] - prev["low"]).replace(
+                0, np.nan
+            )
+            k = float(noise.tail(20).mean()) if noise.tail(20).notna().any() else k
+
+        target_price = float(ctx.current(sym)["open"]) + rng * k
+
+        # 이평 스코어 (전일 종가 기준 → 룩어헤드 없음)
+        close = prev["close"]
+        wins = self.params["ma_windows"]
+        score = sum(float(close.iloc[-1] > close.tail(w).mean()) for w in wins) / len(wins)
+        return k, target_price, score, rng
+
+    def state(self, ctx: Context) -> dict[str, dict[str, float]]:
+        """심볼별 오늘 목표가·이평 스코어 (거래 화면 표시용, 허브 st 키)."""
+        out: dict[str, dict[str, float]] = {}
+        for sym in self.symbols:
+            lv = self._levels(ctx, sym)
+            if lv is not None and lv[3] > 0:
+                out[sym] = {"target": lv[1], "ma_score": lv[2]}
+        return out
+
     def on_bar(self, ctx: Context) -> list[Target]:
         out: list[Target] = []
         n_symbols = max(1, len(self.symbols))
         for sym in self.symbols:
-            if sym not in ctx.bars:
+            lv = self._levels(ctx, sym)
+            if lv is None:
                 continue
-            prev = ctx.prev(sym)
-            cur = ctx.current(sym)
-            if len(prev) < self.warmup_bars:
-                continue
-            p1 = prev.iloc[-1]
-            rng = float(p1["high"] - p1["low"])
+            k, target_price, score, rng = lv
             if rng <= 0:
                 out.append(Target(sym, 0.0, reason="range=0"))
                 continue
-
-            k = float(self.params["k"])
-            if self.params["noise_k"]:
-                noise = 1 - (prev["open"] - prev["close"]).abs() / (
-                    prev["high"] - prev["low"]
-                ).replace(0, np.nan)
-                k = float(noise.tail(20).mean()) if noise.tail(20).notna().any() else k
-
-            target_price = float(cur["open"]) + rng * k
-
-            # 이평 스코어 (전일 종가 기준 → 룩어헤드 없음)
-            close = prev["close"]
-            wins = self.params["ma_windows"]
-            score = sum(float(close.iloc[-1] > close.tail(w).mean()) for w in wins) / len(wins)
+            cur = ctx.current(sym)
+            p1 = ctx.prev(sym).iloc[-1]
 
             # 목표 변동성: 전일 변동폭% 대비
             vol_pct = rng / float(p1["close"])

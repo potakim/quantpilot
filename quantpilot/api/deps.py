@@ -85,11 +85,23 @@ class Deps:
         return self._sessions
 
     async def account(self, market: Market) -> Any:
-        """시장 계좌(포지션·현금·평가액). 기본은 DB의 페이퍼 계좌 복원 (scheduler/backup.py)."""
+        """시장 계좌(포지션·현금·평가액). 기본은 DB의 페이퍼 계좌 복원 (scheduler/backup.py).
+
+        실전 모드(paper=False)는 실계좌가 아직 연결되지 않아(2단계) 503 `LIVE_ACCOUNT_MISSING`으로 알린다 —
+        페이퍼 계좌 복원의 안전장치가 그대로 터지면 이유를 알 수 없는 500이 된다.
+        """
         if self.account_source is not None:
             return await self.account_source(Market(market))
+        from quantpilot.api.errors import ApiError
+        from quantpilot.config import settings as global_settings
         from quantpilot.scheduler.backup import restore_account
 
+        if not getattr(self.settings, "paper", True) or not global_settings.paper:
+            raise ApiError(
+                503,
+                "LIVE_ACCOUNT_MISSING",
+                "실전 계좌가 아직 연결되지 않았습니다 (실계좌 연결은 2단계 — 지금은 페이퍼 모드로 운영)",
+            )
         return await restore_account(self.sessions, Market(market))
 
 

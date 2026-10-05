@@ -7,11 +7,17 @@ API의 사전 검사 결과는 참고일 뿐이고, 실행 직전에 엔진 Risk
 큐 항목
 - `{"op": "submit", "order": {...}, "horizon": "swing"}`
 - `{"op": "cancel", "order_id": "..."}`
+
+시세 신선도: 체결가는 엔진이 마지막으로 본 가격이다. `price_age`(심볼 → 마지막 체결 후 초)를 받으면
+매수(비중을 늘리는 주문)는 그 심볼 체결이 `stale_after`초보다 오래됐을 때 `stale_price`로 거부한다.
+매도·청산은 시세와 무관하게 그대로 처리한다(불변식 #6). 자동 전략은 체결이 있어야 분봉이 생기므로
+시세가 끊기면 애초에 진입하지 않는다 — 이 검사는 수동 주문만의 빈틈을 막는다 (07 §7.6).
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from quantpilot.core.events import FillEvent, OrderEvent
@@ -20,6 +26,9 @@ from quantpilot.core.ports import Hub
 from quantpilot.realtime import keys
 
 log = logging.getLogger(__name__)
+
+# 수동 매수를 받는 최대 시세 나이(초) — 업비트 WS 무응답 판정(data/upbit_ws.STALE_AFTER)과 같은 값
+STALE_AFTER = 30.0
 
 
 def order_from_item(data: dict[str, Any], market: Market) -> Order:
@@ -40,11 +49,21 @@ def order_from_item(data: dict[str, Any], market: Market) -> Order:
 class ManualOrderConsumer:
     """시장 하나의 수동 주문 큐를 TickRunner의 executor로 실행한다."""
 
-    def __init__(self, hub: Hub, runner: Any, *, max_per_drain: int = 20) -> None:
+    def __init__(
+        self,
+        hub: Hub,
+        runner: Any,
+        *,
+        max_per_drain: int = 20,
+        price_age: Callable[[str], float | None] | None = None,
+        stale_after: float = STALE_AFTER,
+    ) -> None:
         self.hub = hub
         self.runner = runner
         self.market = Market(runner.market)
         self.max_per_drain = max_per_drain
+        self.price_age = price_age  # 심볼 → 마지막 체결 후 초 (없으면 신선도 검사 안 함)
+        self.stale_after = stale_after
 
     async def drain(self) -> int:
         """큐에 쌓인 항목을 최대 max_per_drain건 처리하고 처리 건수를 돌려준다."""
@@ -73,6 +92,17 @@ class ManualOrderConsumer:
     async def _submit(self, order: Order, item: dict[str, Any]) -> Fill | Order:
         runner, ex = self.runner, self.runner.executor
         order.ts = runner.clock.now()
+        # 매수는 시세 신선도를 먼저 본다 — 끊긴 시세면 마지막 가격이 있든 없든 같은 이유로 거부
+        if order.side == Side.BUY and self.price_age is not None:
+            age = self.price_age(order.symbol)
+            if age is None or age > self.stale_after:
+                order.status, order.reject_reason = OrderStatus.REJECTED, "stale_price"
+                log.warning(
+                    "manual order rejected: stale price",
+                    extra={"symbol": order.symbol, "age": age},
+                )
+                await runner.bus.publish("order", OrderEvent(order, order.ts))
+                return order
         try:
             price = ex.last_price(order.symbol)
         except KeyError:

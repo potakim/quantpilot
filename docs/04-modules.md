@@ -198,7 +198,7 @@ engine ↔ scheduler는 P1-12 Redis 전까지 DB `settings` 우편함(`engine/li
 - `errors.py`: `{"error": {code, message, detail}}`. 검증 실패는 400 `INVALID_PARAM`.
 - `deps.py`: `Deps`, `CalibrationSource`(t13이 구현), `Answerer`(`StubAnswerer`, `judgment/anthropic.py::ClaudeAnswerer`).
 - `queries.py`(목록·상세 조회, `limit`·`before` 페이지네이션), `gates.py`(G1~G4 근거 모음).
-- 수동 주문·청산·취소: RiskManager 사전 검사 → `q:orders:<market>` → 엔진 `engine/orders.py::ManualOrderConsumer`가 `OrderExecutor`로 실행.
+- 수동 주문·청산·취소: RiskManager 사전 검사 → `q:orders:<market>` → 엔진 `engine/orders.py::ManualOrderConsumer`가 `OrderExecutor`로 실행. 체결가는 엔진이 마지막으로 본 가격이라, 실시간 엔진은 그 종목 마지막 체결이 30초보다 오래됐거나(재시작 뒤 아직 없음 포함) 하면 매수를 `stale_price`로 거부한다(`MarketEngine.trade_age`). 매도·청산은 그대로 처리한다(불변식 #6, 07 §7.6).
 - 백테스트: `ThreadPoolExecutor(1)`, 진행률은 허브 키 `bt:<id>` + WS `backtest:<id>`. 결과 곡선·체결은 `data_dir/backtests/<id>.json`.
 - `ws.py`: `/api/v1/ws`. `WsHub`가 허브를 한 번 구독하고 연결별 채널로 팬아웃. 첫 메시지 인증 실패 4401, 무응답 30초 4408.
 

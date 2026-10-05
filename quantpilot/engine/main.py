@@ -87,9 +87,18 @@ class MarketEngine:
         self._last_link: datetime | None = None
         self._last_status: dict[str, dict] = {}  # 전략 이름 → 마지막으로 보낸 상태
         self._book_ts: dict[str, datetime] = {}  # 심볼 → 마지막으로 보낸 호가 시각
+        self._last_trade: dict[str, float] = {}  # 심볼 → 마지막 체결을 받은 monotonic 시각
+        if orders is not None and getattr(orders, "price_age", False) is None:
+            orders.price_age = self.trade_age  # 시세가 끊긴 동안 수동 매수를 막는다 (07 §7.6)
+
+    def trade_age(self, symbol: str) -> float | None:
+        """심볼의 마지막 체결 이후 경과 초. 이 프로세스에서 체결을 받은 적이 없으면 None."""
+        t = self._last_trade.get(symbol)
+        return None if t is None else self._monotonic() - t
 
     async def on_trade(self, ev: TradeEvent) -> None:
         """체결 1건: 손절 검사(판단 모델 없음) 후 봉 집계."""
+        self._last_trade[ev.symbol] = self._monotonic()
         await self._mark_feed()
         await self.runner.on_stop_check(ev)
         bus = getattr(self.runner, "bus", None)

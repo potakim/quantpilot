@@ -8,7 +8,10 @@
 | `paper` (VPS) | 1~2단계 상시 페이퍼 | PaperBroker, KIS 모의, Alpaca paper | 실시간 |
 | `live` (VPS, 같은 머신 다른 compose 프로젝트) | 3단계 소액 실전 | UpbitBroker(실), KIS(실) | 실시간 |
 
-`paper`와 `live`는 같은 VPS에서 별도 compose 프로젝트(`-p qp-paper`, `-p qp-live`)로 띄운다. DB도 분리. 실전 엔진은 `QP_PAPER=false`와 `QP_LIVE_CONFIRM=<날짜>` 두 값이 모두 있어야 시작한다.
+`paper`와 `live`는 같은 VPS에서 별도 compose 프로젝트(`-p qp-paper`, `-p qp-live`)로 띄운다. DB도 분리.
+
+- **지금(1단계)**: `live`는 아직 없다. `deploy/compose.yml`은 `qp-paper` 하나이고 `QP_PAPER=true`를 못박는다. 엔진·scheduler는 `QP_PAPER=false`면 시작을 거부한다. API는 계좌를 읽는 요청(`/portfolio`·수동 주문·청산)에 503 `LIVE_ACCOUNT_MISSING`을 돌려준다(t43).
+- **3단계 예정**: 실전 엔진은 `QP_PAPER=false`와 `QP_LIVE_CONFIRM=<날짜>` 두 값이 모두 있어야 시작한다. `QP_LIVE_CONFIRM`은 아직 읽는 곳이 없다.
 
 ## 2. VPS 사양과 배포
 
@@ -77,9 +80,9 @@ app/scripts/deploy.sh
 
 | 변수 | 설명 |
 | --- | --- |
-| `QP_ENV` | dev / paper / live |
-| `QP_PAPER` | true면 모든 브로커가 페이퍼 |
-| `QP_LIVE_CONFIRM` | live 시작 승인 날짜(YYYY-MM-DD). 7일 지나면 재승인 필요 |
+| `QP_ENV` | dev / paper / live. 표시용이다 — `/health`의 `env`로만 나가고 동작은 바꾸지 않는다 |
+| `QP_PAPER` | true면 모든 브로커가 페이퍼. false면 엔진·scheduler는 시작을 거부하고 계좌 API는 503(1단계, 위 §1) |
+| `QP_LIVE_CONFIRM` | (3단계 예정, 아직 읽는 곳 없음) live 시작 승인 날짜(YYYY-MM-DD). 7일 지나면 재승인 필요 |
 | `QP_DATABASE_URL`, `QP_REDIS_URL` | 연결 |
 | `QP_ADMIN_PASSWORD` | 화면 로그인 · 2차 확인 |
 | `QP_JWT_SECRET` | 32바이트 이상 |
@@ -89,7 +92,7 @@ app/scripts/deploy.sh
 | `QP_EVENTS_FILE` | 이벤트 캘린더 YAML(FOMC·CPI·금통위·업비트 점검). paper compose는 저장소의 `deploy/events.yaml`을 `/app/config/events.yaml`로 꽂고 이 값을 고정한다 — 일정 갱신은 그 파일을 PR로 고친다. 로컬 기본 `data/events.yaml`, 없으면 빈 캘린더 |
 | `QP_UPBIT_*`, `QP_KIS_*`, `QP_ALPACA_*`, `QP_TYPESAFE_API_KEY`, `QP_ANTHROPIC_API_KEY`, `QP_GOOGLE_API_KEY`, `QP_DART_API_KEY` | 외부 키. Gemini 키가 없으면 뉴스 요약은 제목 절단, Claude 키가 없으면 일일 리뷰는 통계만 (ADR 0021) |
 
-키는 VPS의 `/opt/quantpilot/.env`(권한 600)에만. 화면의 "설정 > API 키"는 `.env`를 쓰지 않고 DB `settings`에 암호화(Fernet, 키는 `QP_SECRET_KEY`) 저장하며, 값은 절대 반환하지 않고 "등록됨/미등록"만 보여준다. 업비트 키는 **출금 권한 제외**, KIS는 모의·실전 앱키 분리.
+키는 VPS의 `/opt/quantpilot/.env`(권한 600)에 둔다. 화면의 "설정 > API 키"(`POST /settings/keys`, 비밀번호 재확인)는 `.env`를 건드리지 않고 `data/keys.env`(권한 600, `QP_<이름>=값`)에 쓴다. 설정은 `.env` → `data/keys.env` 순으로 읽히므로 저장한 키는 api·scheduler·engine을 재시작해야 적용된다(ADR 0017 §4). 값은 절대 반환하지 않고 "등록됨/미등록"만 보여준다. 이 파일은 암호화하지 않으므로 백업에서 빼고(§2.2) 권한으로 지킨다. 업비트 키는 **출금 권한 제외**, KIS는 모의·실전 앱키 분리.
 
 ## 4. 스케줄 (KST)
 
@@ -98,16 +101,21 @@ app/scripts/deploy.sh
 | 잡 | 시각 | 동작 |
 | --- | --- | --- |
 | `db_backup` | 03:30 | VPS cron이 `scripts/backup.sh` 실행: `pg_dump` + `data/`(키 제외) → 오브젝트 스토리지(30일 보관). scheduler 잡이 아니다 (§2.2, ADR 0019) |
-| `log_rotate` | 03:40 | 14일 |
-| `cost_report` | 매일 20:35 | AI 비용·거래 비용 일일 합계 알림 |
-| `weekly_gate_report` | 월 08:35 | 관문 G1~G4 상태 알림 |
+| 로그 보관 | 상시 | Docker `json-file` 드라이버가 컨테이너마다 20 MB × 5개로 돌려 쓴다(`deploy/compose.yml`의 `logging`). 날짜 기준 보관(14일) 잡은 없다 |
+| `cost_report` | 매일 20:35 | (미구현 — 2단계 예정) AI 비용·거래 비용 일일 합계 알림. 지금은 대시보드 AI 판단 카드와 전략 설정의 "이번 달 AI 비용"(`/costs/ai`)으로 본다 |
+| `weekly_gate_report` | 월 08:35 | (미구현 — 2단계 예정) 관문 G1~G4 상태 알림. 지금은 화면(대시보드·전략 카드)과 `GET /reports/gates`로 본다 |
+
+scheduler 잡은 `quantpilot/scheduler/registry.py`의 `JOBS`가 기준이다. 그중 `krx_close_orders`·`us_orb_entry_window`·`kis_token_refresh`·`upbit_prescreen`·`morning_brief`는 본문이 아직 연결되지 않은 자리(`_hook`)다.
 
 ## 5. 모니터링
 
 - 헬스: `/health`를 외부 업타임 모니터(1분)로. `engine_alive`가 false면 알림.
 - 메트릭(Prometheus, 2단계): 틱 지연, 판단 모델 지연·타임아웃율, 주문 오류율, WS 재접속 수, AI 비용.
-- 로그: JSON 라인, `docker logs` + 파일. 레벨: 주문·체결·리스크 이벤트는 INFO, 판단 결과는 INFO(요약)·DEBUG(state 전문).
-- 대시보드 상단 상태 표시: 브로커 연결, 시세 지연(마지막 체결 후 초), 할트 여부, 오늘 AI 비용.
+- 로그: `docker logs`(json-file 드라이버, 위 §4). 엔진·scheduler는 `quantpilot/logsetup.py`(logging 기본 텍스트 형식)를 쓰고, API는 uvicorn 기본 형식이다. 지금은 `extra={...}` 구조화 필드가 출력에 찍히지 않는다 — JSON 라인 출력은 "로그 구조화" 카드에서 한다(예정). httpx·httpcore 로거는 URL에 키가 실릴 수 있어 WARNING으로 올려 둔다(불변식 #10). 레벨: 주문·체결·리스크 이벤트는 INFO.
+- 화면 상단 상태 표시:
+  - 헤더는 연결 상태 한 줄(API 끊김 / 엔진 응답 없음 / 실시간 재연결 중 / 시세 수신 없음 / "업비트 연결됨")과 페이퍼·실전 배지를 보인다.
+  - 할트는 대시보드 할트 배너에, 오늘 AI 비용은 대시보드 AI 판단 카드에 보인다.
+  - 시세 지연(마지막 체결 후 초)은 아직 보이지 않는다.
 
 ## 6. 알림 등급
 
@@ -115,7 +123,7 @@ app/scripts/deploy.sh
 | --- | --- | --- |
 | info | 체결, 일일 리뷰, 비용 리포트 | 텔레그램 |
 | warning | WS 재접속, 판단 모델 타임아웃 누적, 관문 미달 | 텔레그램 |
-| critical | 청산 실패, 서킷브레이커, API 할트, 정합 불일치, 엔진 다운 | 텔레그램 5분 반복 + 이메일 |
+| critical | 청산 실패, 서킷브레이커, API 할트, 정합 불일치, 엔진 다운 | 텔레그램 5분 반복(scheduler `alert_repeat`). 이메일은 미구현(SMTP 변수를 정한 뒤 추가) |
 
 ## 7. 런북
 
@@ -132,11 +140,13 @@ app/scripts/deploy.sh
 
 ### 7.3 정합 불일치 (`reconcile_mismatch`)
 
-1. 화면 "포지션 > 브로커 대조"에서 차이 확인(수동 거래, 부분 체결 누락, 상장폐지 등).
-2. 원인이 시스템 밖(수동 거래)이면 "브로커 기준으로 맞추기" → DB 갱신 → 할트 해제.
+1. 대시보드 할트 배너와 텔레그램 알림에서 차이 확인(수동 거래, 부분 체결 누락, 상장폐지 등). 별도의 "브로커 대조" 화면은 없다.
+2. 원인이 시스템 밖(수동 거래)이면 할트 배너의 "브로커 기준으로 맞추기"(`POST /reconcile/{market}/accept-broker`) → DB 갱신 → 할트 해제.
 3. 원인이 시스템 안(체결 누락)이면 `orders`·`fills` 수기 보정 후 버그 이슈.
 
-### 7.4 KIS 토큰 갱신 실패
+### 7.4 KIS 토큰 갱신 실패 (2단계)
+
+KIS 어댑터와 `kis_token_refresh` 본문은 2단계에서 연결한다(지금은 `_hook` 자리). 아래는 그때의 동작이다.
 
 - 자동: 국내·미국 전략 당일 휴무 플래그, 보유분은 기존 토큰 만료 전 청산 시도.
 - 사람: KIS 포털에서 앱키 상태 확인(1일 발급 한도, 앱 만료). 재발급 후 `settings/keys` 갱신 → `scheduler`가 다음 시도.
@@ -148,16 +158,27 @@ app/scripts/deploy.sh
 
 ### 7.6 거래소 점검·장애
 
-- 업비트 점검 공지는 `events.py`에 등록 → 그 시간 진입 금지. 예고 없는 장애는 WS 30초 무응답 → 진입 중단, REST 폴링.
+- 업비트 점검 공지는 이벤트 캘린더(`QP_EVENTS_FILE`, paper는 `deploy/events.yaml`)에 등록 → 그 시간 진입 금지.
+- 예고 없는 장애:
+  - 지금: WS가 30초 동안 응답이 없으면 다시 연결한다(`data/upbit_ws.py`의 `STALE_AFTER`). 재시도를 다 쓰면 스트림이 멈춘다. 체결이 60초 없으면 허브 `feed` 키가 만료되어 헤더가 "시세 수신 없음"으로 바뀐다(ADR 0029).
+  - 미구현: "시세가 오래되면 진입 중단"(`UpbitStream.ensure_fresh`는 있으나 부르는 곳이 없다)과 REST 폴링 대체. 다음 카드 후보다.
 - 보유 중 장애가 길어지면 알림만. 손절가 이탈은 복구 후 첫 체결가에 처리.
 
 ### 7.7 실전 전환 절차 (3단계)
 
-1. `/reports/gates`에서 G1·G2 통과 확인. 화면 "실전 전환" 버튼 활성.
+아직 실행할 수 없는 3단계 절차다. 지금 있는 것은 다음 세 가지뿐이다.
+
+- 관문 API `GET /reports/gates`. 화면에서는 대시보드와 전략 카드가 G1·G2를 보여 준다.
+- 전략별 전환 API `POST /strategies/{name}/go-live`. 관문 미통과면 409, 통과하면 비밀번호를 다시 확인한 뒤 DB의 전략 `paper`만 바꾼다.
+- ORB의 잠긴 "실전 전환 (잠김)" 버튼.
+
+일반 전략의 실전 전환 버튼, `QP_LIVE_CONFIRM` 검사, `qp-live` compose, 실계좌 연결은 3단계에서 만든다.
+
+1. 관문 G1·G2 통과 확인. 화면 "실전 전환" 버튼 활성.
 2. 업비트 실계좌 API 키(출금 권한 없음, 허용 IP 등록) 등록.
 3. 자본 배정: 실전은 총 자본의 10% 이하로 `allocation` 설정. 나머지는 페이퍼 유지.
 4. 버튼 → 비밀번호 재입력 → `QP_LIVE_CONFIRM`에 오늘 날짜 → `qp-live` compose 기동.
-5. 첫 3거래일은 `max_weight`를 절반으로(설정), 매일 리뷰 확인.
+5. 첫 3거래일은 전략 설정 화면에서 `max_weight`를 직접 절반으로 내리고(자동 아님), 매일 리뷰 확인.
 
 ## 8. 비용 예산 (월)
 

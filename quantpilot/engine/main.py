@@ -6,6 +6,7 @@ TickRunner.on_time_exit로 실행한 뒤 ack한다 (04 §8). 수동 주문 큐(M
 같은 타이머에서 비운다. 이벤트는 HubBus로 허브(Redis pub/sub) → api WS 허브 → 화면에 간다 (P1-12).
 전략 설정(켜기/끄기·배분·파라미터)과 확신도 임계값도 시작 직후와 하트비트마다 읽어 반영한다 (ADR 0032).
 그 뒤 전략별 상태(켜짐·배분·보유)가 바뀌었으면 WS `strategy.status`로 화면에 알린다 (ADR 0034).
+업비트 WS로 받은 호가는 타이머마다(초당 1번) 바뀐 종목만 허브 `ob` 키와 `orderbook` 채널로 내보낸다 (02 §5, 03 §3).
 
 같은 구간의 봉은 심볼마다 확정 시점이 다르다(다음 체결이 먼저 오면 즉시, 아니면 마감 + grace 타이머).
 여러 심볼을 보는 전략이 한 시각에 한 번만 평가되도록, 확정된 봉은 그 구간의 마감 + grace까지 모았다가
@@ -76,12 +77,13 @@ class MarketEngine:
         self.link_every = link_every
         self.orders = orders
         self.news = news  # scheduler가 DB에 쌓은 뉴스 → 피처 빌더 캐시 (ADR 0021)
-        self.hub = hub  # 시세 연결 표시 feed 키 (ADR 0029) · strategy.status (ADR 0034)
+        self.hub = hub  # 시세 연결 표시 feed 키 (ADR 0029) · strategy.status (ADR 0034) · 호가
         self._monotonic = monotonic
         self._last_feed: float | None = None
         self._closed: list[BarClosed] = []
         self._last_link: datetime | None = None
         self._last_status: dict[str, dict] = {}  # 전략 이름 → 마지막으로 보낸 상태
+        self._book_ts: dict[str, datetime] = {}  # 심볼 → 마지막으로 보낸 호가 시각
 
     async def on_trade(self, ev: TradeEvent) -> None:
         """체결 1건: 손절 검사(판단 모델 없음) 후 봉 집계."""
@@ -279,13 +281,43 @@ class MarketEngine:
         blocked = got[1] if got is not None and got[0] == today else {}
         apply(blocked)
 
+    async def publish_orderbooks(self, stream) -> None:
+        """스트림이 받은 최신 호가 중 바뀐 종목만 허브 `ob` 키(TTL 10초)와 `orderbook` 채널로 (02 §5, 03 §3).
+
+        같은 스냅샷은 다시 쓰지 않는다 — 시세가 끊기면 키가 10초 뒤 사라져 화면이 오래된 호가를 보여 주지 않는다.
+        표시용이라 실패해도 매매는 계속한다.
+        """
+        get = getattr(stream, "orderbook", None)
+        if self.hub is None or get is None:
+            return
+        from quantpilot.realtime.bus import ORDERBOOK_TTL, message, orderbook_payload
+
+        market = self.runner.market
+        for sym in getattr(stream, "symbols", ()):
+            snap = get(sym)
+            if snap is None or self._book_ts.get(sym) == snap.ts:
+                continue
+            data = orderbook_payload(snap)
+            try:
+                await self.hub.set(hk.ob(market, sym), data, ttl=ORDERBOOK_TTL)
+                await self.hub.publish(
+                    hk.orderbook_channel(market, sym), message(snap.ts, data, market)
+                )
+            except Exception as e:  # noqa: BLE001 — 화면 표시 실패로 매매가 멈추면 안 된다
+                log.warning(
+                    "orderbook publish failed", extra={"symbol": sym, "error": type(e).__name__}
+                )
+                return
+            self._book_ts[sym] = snap.ts
+
     async def run(self, stream, *, interval: float = 1.0) -> None:
-        """스트림(run()이 체결을 on_trade로 넘김)과 타이머를 함께 돌린다."""
+        """스트림(run()이 체결을 on_trade로 넘김)과 타이머를 함께 돌린다. 호가는 타이머마다(초당 1번) 내보낸다."""
 
         async def timer() -> None:
             while True:
                 await asyncio.sleep(interval)
                 await self.on_timer()
+                await self.publish_orderbooks(stream)
 
         async with asyncio.TaskGroup() as tg:
             tg.create_task(stream.run())

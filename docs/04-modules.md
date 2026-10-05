@@ -27,6 +27,7 @@ strategies ──✕──▶ 그 외 전부      (core만)
 - `Strategy.horizon`이 `intraday`인 전략은 `Target.stop`을 반드시 준다 (RiskManager 1% 룰 계산용). 테스트로 강제.
 - 월간 전략(`timeframe="1M"`)의 `on_bar`는 엔진이 **월 마지막 거래일 15:20(KRX) / 15:55 ET(미국)** 봉에서만 호출한다. 판단은 `MarketClock.is_last_session_of_month(ts)`.
 - `Strategy.describe()`에 `public_reference: {cagr, mdd, source}`를 추가해 화면과 G1 스크립트가 쓴다.
+- `Strategy.state(ctx)`는 화면 표시용 심볼별 상태(`{심볼: {이름: 값}}`, 기본 빈 dict)다. 주문·사이징에 쓰지 않으며 `on_bar`의 출력(`Target`)과 무관하다(불변식 #1). 변동성 돌파만 `{target, ma_score}`를 돌려주고, `on_bar`와 같은 함수로 계산한다.
 
 ## 3. features (1단계 신규)
 
@@ -154,6 +155,7 @@ class TickRunner:
 - 화면 표시 (허브가 있을 때만, 실패해도 매매는 계속):
   - 하트비트마다 바뀐 전략 상태를 WS `strategy.status`로 보낸다 (ADR 0034).
   - 타이머(1초)마다 `UpbitStream`이 받은 호가 중 바뀐 종목만 허브 `ob:{market}:{symbol}`(TTL 10초)와 WS `orderbook:{market}:{symbol}`로 보낸다(`{asks, bids}` 5단계, 02 §5·03 §3). 같은 스냅샷은 다시 쓰지 않으므로 시세가 끊기면 10초 뒤 호가가 사라진다.
+  - 하트비트마다 `TickRunner.strategy_state(now)`로 심볼별 전략 상태를 허브 `st:{market}:{symbol}`(TTL 60초)에 쓴다. 변동성 돌파는 `{target, ma_score}`(오늘 목표가·이평 스코어)이고, `on_bar`와 같은 거래일 일봉·같은 계산(`VolBreakout._levels`)이라 화면 목표가가 실제 진입가와 같다. 오늘 일봉이 아직 없는 심볼(09:00 직후 첫 분봉 전)은 쓰지 않는다. `/quotes`의 `strategy`가 이 키를 읽어 거래 화면 목표가 점선·돌파 문구·관심 종목 부제를 그린다. `/schedule`의 목표가는 1분봉으로 시가를 근사하므로 이 값과 조금 다를 수 있고, 진입에 쓰이는 값은 이쪽이다.
 - 실시간 페이퍼 엔진(`engine/main.py::build_upbit_paper`)의 피처 빌더는 `features/builder.py::FeatureBuilder`다. 뉴스는 `NewsRefresher`가 엔진 타이머에서 DB `news_items`를 5분마다 `NewsCache`로 옮기고, 이벤트는 `QP_EVENTS_FILE` YAML + DART 위험 공시다 (ADR 0021). 판단 모델이 `stub`이면 뉴스는 판단 로그에만 남고 사이징은 바뀌지 않는다.
 - 백테스터는 이 `TickRunner`를 `PaperBroker` + `DirectExecutor` + `StubPipeline(StubJudge, gating=False)` + `ReplayClock` + `UnrestrictedRisk`(기본, `apply_risk=True`면 `RiskManager`)로 돌린다. 0단계 `Backtester.run`의 인라인 루프는 제거했다. 배선 결정과 0단계 대비 수치 차이는 ADR 0010.
 

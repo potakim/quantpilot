@@ -214,6 +214,7 @@ create table daily_reviews (
 | --- | --- | --- | --- |
 | `px:{market}:{symbol}` | string | 마지막 체결가 | 60s |
 | `ob:{market}:{symbol}` | hash | 최우선 호가 5단계 | 10s |
+| `st:{market}:{symbol}` | hash | 전략 화면 상태 — 변동성 돌파 `{target, ma_score}` (엔진 하트비트마다 갱신, 04 §7) | 60s |
 | `bar:{market}:{symbol}:{tf}` | hash | 집계 중인 현재 봉 | 없음 |
 | `pos:{market}` | hash | symbol → JSON(Position) | 없음 |
 | `eq:{market}` | string | 현재 equity | 없음 |

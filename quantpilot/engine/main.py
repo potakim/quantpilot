@@ -6,6 +6,7 @@ TickRunner.on_time_exit로 실행한 뒤 ack한다 (04 §8). 수동 주문 큐(M
 같은 타이머에서 비운다. 이벤트는 HubBus로 허브(Redis pub/sub) → api WS 허브 → 화면에 간다 (P1-12).
 전략 설정(켜기/끄기·배분·파라미터)과 확신도 임계값도 시작 직후와 하트비트마다 읽어 반영한다 (ADR 0032).
 그 뒤 전략별 상태(켜짐·배분·보유)가 바뀌었으면 WS `strategy.status`로 화면에 알린다 (ADR 0034).
+심볼별 전략 상태(변동성 돌파 목표가·이평 스코어)는 같은 주기에 허브 `st` 키(TTL 60초)에 쓴다 (02 §2).
 업비트 WS로 받은 호가는 타이머마다(초당 1번) 바뀐 종목만 허브 `ob` 키와 `orderbook` 채널로 내보낸다 (02 §5, 03 §3).
 
 같은 구간의 봉은 심볼마다 확정 시점이 다르다(다음 체결이 먼저 오면 즉시, 아니면 마감 + grace 타이머).
@@ -50,6 +51,8 @@ DAILY_SEED_DAYS = 60
 # 시세 연결 표시 (realtime/keys.feed): 체결이 60초 없으면 끊김으로 보인다 (ADR 0029)
 FEED_TTL = 60.0
 FEED_EVERY = 10.0
+# 전략 상태 st 키 (목표가·이평 스코어): 하트비트(5초)마다 덮어쓰고, 엔진이 멈추면 1분 뒤 사라진다
+STATE_TTL = 60.0
 
 
 class MarketEngine:
@@ -156,6 +159,7 @@ class MarketEngine:
             await self._sync_gate()
         self.runner.restore_state(now, done)
         await self._publish_status()
+        await self._publish_state(now)
         log.info("engine state restored", extra={"market": market.value})
 
     async def _publish_status(self) -> None:
@@ -176,6 +180,22 @@ class MarketEngine:
                 log.warning("strategy.status publish failed", extra={"error": type(e).__name__})
                 return
             self._last_status[item["name"]] = item
+
+    async def _publish_state(self, now: datetime) -> None:
+        """심볼별 전략 상태(목표가·이평 스코어)를 허브 `st` 키에 쓴다 (TTL 60초, 하트비트마다 갱신).
+
+        거래 화면의 목표가 점선·돌파 문구·관심 종목 부제가 `/quotes`로 이 키를 읽는다. 엔진이 멈추면 1분 뒤
+        사라져 지난 거래일 목표가가 남지 않는다. 표시용이라 실패해도 매매는 계속.
+        """
+        state = getattr(self.runner, "strategy_state", None)
+        if self.hub is None or state is None:
+            return
+        market = self.runner.market
+        try:
+            for sym, data in state(now).items():
+                await self.hub.set(hk.strategy_state(market, sym), data, ttl=STATE_TTL)
+        except Exception as e:  # noqa: BLE001 — 화면 표시 실패로 매매가 멈추면 안 된다
+            log.warning("strategy state publish failed", extra={"error": type(e).__name__})
 
     def _risks(self) -> list:
         """ON·섀도 원장의 RiskManager (섀도도 같은 월 기준으로 서킷브레이커를 건다)."""
@@ -211,6 +231,7 @@ class MarketEngine:
             await self.runner.on_time_exit(s.name)
             await self.link.ack_time_exit(market, s.name, cmd_id)
         await self._publish_status()
+        await self._publish_state(now)
 
     async def _sync_configs(self, market) -> None:
         """저장된 전략 설정을 기본값과 합쳐 TickRunner에 넘긴다 (ADR 0032)."""

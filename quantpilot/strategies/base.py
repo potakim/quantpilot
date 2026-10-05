@@ -86,6 +86,10 @@ class Strategy(ABC):
     def on_bar(self, ctx: Context) -> list[Target]:
         """현재 봉에서 원하는 목표 비중 목록. 비어 있으면 '변경 없음'."""
 
+    def state(self, ctx: Context) -> dict[str, dict[str, float]]:
+        """화면 표시용 심볼별 상태(예: 목표가·이평 스코어). 읽기 전용이며 주문·사이징에 쓰지 않는다."""
+        return {}
+
     def describe(self) -> dict:
         return {
             "name": self.name,

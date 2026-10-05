@@ -208,6 +208,29 @@ class TickRunner:
             )
         return out
 
+    def strategy_state(self, now: datetime) -> dict[str, dict[str, float]]:
+        """심볼별 전략 화면 상태(목표가·이평 스코어) — 허브 st 키. on_bar와 같은 봉 표로 계산한다.
+
+        일봉 전략은 거래일 일봉(진행 중인 오늘 봉 포함)을 쓴다. 09:00이 지나 오늘 봉이 아직 없는 심볼은 뺀다 —
+        그대로 계산하면 어제 봉을 '오늘'로 보고 지난 거래일 목표가를 낸다. 준비 기간 전이면 빈 dict.
+        """
+        bars = self.history.view()
+        daily_bars = self.daily.view() if self.daily is not None else None
+        out: dict[str, dict[str, float]] = {}
+        for s in self.strategies:
+            daily = daily_bars is not None and self._daily_mode(s)
+            sbars = daily_bars if daily else bars
+            if not self._ready(s, sbars):
+                continue
+            ctx = Context(
+                ts=pd.Timestamp(now), bars=sbars, positions={}, equity=0.0, params=s.params
+            )
+            for sym, st in s.state(ctx).items():
+                if daily and sbars[sym].index[-1] != self.daily.day_of(now):
+                    continue
+                out[sym] = st
+        return out
+
     # ---------- 이벤트 입구 ----------
     async def on_bar_closed(self, ev: BarClosed) -> None:
         """봉 1개 마감."""

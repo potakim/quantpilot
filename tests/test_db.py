@@ -40,7 +40,7 @@ from quantpilot.core.repos import (
     SignalRepo,
 )
 from quantpilot.db import mappers
-from quantpilot.db.models import Base
+from quantpilot.db.models import Base, SettingRow
 from quantpilot.db.repo import (
     SqlConfigRepo,
     SqlJudgmentRepo,
@@ -360,3 +360,19 @@ async def test_config_settings_and_strategies(sessions):
     [s] = await config.strategies(Market.US)
     assert (s["allocation"], s["symbols"], s["enabled"]) == (0.4, ["SPY"], True)
     assert await config.strategies(Market.KRX) == []
+
+
+async def test_overlap_guard_flags_two_sessions_on_one_connection(sessions, connection_overlaps):
+    """연결 하나를 두 세션이 같이 쥐면 커밋 전 쓰기가 사라진다 — conftest 가드가 그 순간을 잡는다 (t40)."""
+    config = SqlConfigRepo(sessions)
+    await config.set_setting("seq", 1)
+    assert await config.get_setting("seq") == 1
+    assert connection_overlaps == []  # 차례로 쓰면 겹치지 않는다
+
+    async with sessions.begin() as w:
+        w.add(SettingRow(key="k", value=1))
+        await w.flush()  # INSERT는 나갔지만 커밋 전
+        assert await config.get_setting("k") == 1  # 같은 연결의 다른 세션이 읽고 반납(rollback)
+    assert connection_overlaps and max(connection_overlaps) == 2
+    assert await config.get_setting("k") is None  # 반납 때의 rollback이 커밋 전 쓰기를 지웠다
+    connection_overlaps.clear()  # 일부러 겹쳤으니 가드가 이 테스트를 실패시키지 않게

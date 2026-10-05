@@ -94,7 +94,9 @@ function KpiRow() {
         sub={
           p
             ? `현금 ${fmtKrw(cashKrw(p))}${!p.total_includes_us ? " · 미국 제외 (환율 없음)" : ""}`
-            : "포트폴리오를 불러오지 못했습니다"
+            : portfolio.isError
+              ? reasonText(portfolio.error)
+              : "포트폴리오를 불러오지 못했습니다"
         }
       />
       <KpiCard
@@ -343,6 +345,7 @@ function MobileDashboard() {
         <Card className="flex flex-col gap-2.5 rounded-[16px] p-[18px]">
           <div className="text-xs text-muted">총 자산</div>
           <div className="num text-[28px] font-bold">{p ? fmtKrw(p.total_equity_krw) : DASH}</div>
+          {portfolio.isError ? <ErrorNote>{reasonText(portfolio.error)}</ErrorNote> : null}
           <div className="flex flex-wrap gap-x-3.5 gap-y-1 text-xs">
             <span className={TONE_TEXT[pnl.tone]}>
               오늘 {pnl.value}

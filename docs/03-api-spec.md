@@ -20,6 +20,7 @@ FastAPI, base `/api/v1`. 인증은 `Authorization: Bearer <JWT>` (단일 사용�
 | 409 | `NO_PRICE` / `HALTED` / `GATE_LOCKED` / `MARKET_NOT_LIVE` | 시세 없음 / 할트 중 / 관문 미통과 / 실시간 엔진이 없는 시장 (ADR 0031) |
 | 422 | `RISK_REJECTED` | RiskManager 거부 (detail에 RiskDecision) |
 | 502 | `BROKER_ERROR` / `DATA_ERROR` / `JUDGE_ERROR` | 외부 API 실패 |
+| 503 | `LIVE_ACCOUNT_MISSING` | 실전 모드(`QP_PAPER=false`)인데 실계좌가 아직 연결되지 않음 — 계좌를 읽는 `/portfolio`·`POST /orders`·포지션 청산·정합성 수락 (실계좌 연결은 2단계) |
 
 ### 페이지네이션
 

@@ -10,7 +10,10 @@
 - 엔진 대신 짧은 루프가 하트비트·시세 틱·호가·portfolio를 흘려 WS 실시간 갱신을 보여 준다.
 
 사용:
-    python scripts/web_demo_api.py [--port 8000] [--halt] [--engine-down]
+    python scripts/web_demo_api.py [--port 8000] [--halt] [--engine-down] [--live]
+
+`--live`는 화면 확인용이다: API가 실전 모드(paper=False)로 응답하고 변동성 돌파만 실전 전환 상태로 둔다.
+데이터는 그대로 페이퍼로 심는다(계좌 복원은 settings.paper=True에서만 — 안전장치는 건드리지 않는다).
 """
 
 from __future__ import annotations
@@ -142,7 +145,7 @@ def _book(price: float) -> dict[str, list[list[float]]]:
     return {"asks": asks, "bids": bids}
 
 
-async def seed(sessions: Any, hub: Any, *, halt: bool) -> dict[str, float]:
+async def seed(sessions: Any, hub: Any, *, halt: bool, live: bool = False) -> dict[str, float]:
     """합성 데이터를 심고 심볼별 마지막 가격을 돌려준다."""
     from quantpilot.api.gates import g1_key
     from quantpilot.db.repo import (
@@ -164,7 +167,10 @@ async def seed(sessions: Any, hub: Any, *, halt: bool) -> dict[str, float]:
     config = SqlConfigRepo(sessions)
     # 배포 직후와 같은 권장 조합 기본값 (ADR 0032)
     for name, cls in REGISTRY.items():
-        await config.upsert_strategy(name=name, market=cls.market, **strategy_config(name))
+        cfg = strategy_config(name)
+        if live and name == "vol_breakout":  # 실전 모드 화면: 한 전략만 실전, 나머지는 '페이퍼만'
+            cfg["paper"] = False
+        await config.upsert_strategy(name=name, market=cls.market, **cfg)
     # G1 근거 (2026-10-04 `qp gate g1` 실데이터 실행 결과를 반올림한 값) — 카드의 백테스트 요약 표시용
     g1 = {
         "vol_breakout": (
@@ -511,6 +517,7 @@ async def main(argv: list[str] | None = None) -> None:
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--halt", action="store_true", help="업비트 할트 상태로 시작 (배너 확인용)")
     p.add_argument("--engine-down", action="store_true", help="하트비트를 보내지 않는다")
+    p.add_argument("--live", action="store_true", help="실전 모드 화면으로 응답 (데이터는 페이퍼)")
     a = p.parse_args(argv)
 
     admin_password = os.environ.get("QP_ADMIN_PASSWORD", "")
@@ -526,10 +533,11 @@ async def main(argv: list[str] | None = None) -> None:
         redis_url="",
         admin_password=admin_password,
         jwt_secret=jwt_secret,
+        paper=not a.live,
     )
     engine, sessions = await demo_sessions(tmp / "demo.db")
     hub = MemoryHub()
-    last = await seed(sessions, hub, halt=a.halt)
+    last = await seed(sessions, hub, halt=a.halt, live=a.live)
     app = create_app(
         settings=settings,
         sessions=sessions,

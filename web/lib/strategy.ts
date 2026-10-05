@@ -189,6 +189,15 @@ export function llmModels(claude: boolean, gemini: boolean): string[] {
   return [claude ? "claude" : "stub", gemini ? "gemini" : "stub"];
 }
 
+/** AI 판단 설정 저장 후 안내 — 키마다 적용 시점이 다르다 (ADR 0032·0035). */
+export function judgeSavedNote(keys: string[]): string {
+  const notes: string[] = [];
+  if (keys.some((k) => k === "judge.provider" || k === "llm.models")) notes.push("판단 모델·리뷰어는 엔진을 다시 켜면 적용됩니다.");
+  if (keys.some((k) => k.startsWith("gate."))) notes.push("임계값은 엔진이 5초 안에 반영합니다.");
+  if (keys.includes("news.enabled")) notes.push("뉴스 요약은 다음 정시 수집부터 적용됩니다.");
+  return notes.join(" ");
+}
+
 /** 저장한 판단 모델·리뷰어가 엔진이 쓰는 것과 다르다 = 재시작해야 적용된다. 엔진 기록이 없으면 모름(false). */
 export function restartPending(j: JudgeView | undefined): boolean {
   if (!j?.active) return false;

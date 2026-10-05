@@ -35,7 +35,7 @@ FastAPI, base `/api/v1`. 인증은 `Authorization: Bearer <JWT>` (단일 사용�
 | GET | `/health` | `{ok, version, paper, env, engine_alive, ws_connected:{upbit,kis}, halted:{upbit,krx,us}, live_markets:["upbit"]}` — `live_markets`는 실시간 엔진이 도는 시장 (ADR 0031) |
 | POST | `/auth/login` | `{password}` → `{token, expires_at}` |
 | GET | `/settings` | settings 테이블 전체 + RiskRules(읽기 전용, `locked:true`) + `judge`: 지금 유효한 AI 판단 설정 `{provider, llm_models, hold_below, full_above, keys:{typesafe, claude, gemini}, active}`. 저장값이 없으면 환경변수 값, `keys`는 키 유무(true/false)만, `active`는 엔진이 실제로 쓰는 `{provider, llm_models, ts}`(`engine.judge.upbit`, 없으면 null) (ADR 0032) |
-| PATCH | `/settings` | `{key: value, ...}` — 허용 키만: `gate.*`, `judge.provider`, `llm.models`, `news.enabled`, `notify.*`. `gate.*`는 엔진이 하트비트(5초)마다 읽어 바로 반영, `judge.provider`·`llm.models`는 엔진 재시작 때 적용. 연결되지 않은 `laya`는 400 `INVALID_PARAM`, 키가 없는 모델은 400 `KEY_MISSING` (ADR 0032) |
+| PATCH | `/settings` | `{key: value, ...}` — 허용 키만: `gate.*`, `judge.provider`, `llm.models`, `news.enabled`, `notify.*`. `gate.*`는 엔진이 하트비트(5초)마다 읽어 바로 반영, `judge.provider`·`llm.models`는 엔진 재시작 때 적용. `news.enabled`(bool)는 다음 정시 뉴스 수집부터 Gemini 요약을 켜고 끈다 — 꺼도 수집은 계속하고 제목 요약으로 저장(ADR 0035), `GET /settings`의 `judge.news_summary`가 유효값. 연결되지 않은 `laya`는 400 `INVALID_PARAM`, 키가 없는 모델은 400 `KEY_MISSING` (ADR 0032) |
 
 ### 2.2 전략
 

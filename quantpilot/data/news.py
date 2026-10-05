@@ -301,9 +301,12 @@ class NewsCollector:
             log.warning("feed fetch failed", extra={"feed": feed.name, "error": type(e).__name__})
             return []
 
-    async def collect(self, now: datetime | None = None) -> list[NewsItem]:
-        """한 번 수집해 새로 저장한 뉴스를 돌려준다."""
+    async def collect(
+        self, now: datetime | None = None, *, summarizer: Summarizer | None = None
+    ) -> list[NewsItem]:
+        """한 번 수집해 새로 저장한 뉴스를 돌려준다. summarizer를 주면 이번 회차만 그것으로 요약한다."""
         now = now or datetime.now(UTC)
+        summarizer = summarizer or self.summarizer
         batches = await asyncio.gather(*(self._fetch_feed(f, now) for f in self.feeds))
         cutoff = now - self.max_age
 
@@ -321,7 +324,7 @@ class NewsCollector:
                 todo.append(item)
 
         for item in todo:
-            s = await asyncio.to_thread(self.summarizer.summarize, item.title, item.body)
+            s = await asyncio.to_thread(summarizer.summarize, item.title, item.body)
             item.summary, item.risk_flags, item.risk_score = (
                 s.summary,
                 list(s.risk_flags),

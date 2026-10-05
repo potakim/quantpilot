@@ -58,8 +58,9 @@ export const useEquityCurve = (market: string, days: 30 | 90 | 365) =>
 export const useSchedule = () =>
   useQuery({ queryKey: ["schedule"], queryFn: () => apiFetch<ScheduleItem[]>("/schedule"), refetchInterval: 60_000 });
 
+// WS strategy.status(엔진, 바뀔 때)를 받으면 다시 읽고, 그 밖에도 1분마다 — 이번 달·MDD는 시세로도 바뀐다 (ADR 0034)
 export const useStrategies = () =>
-  useQuery({ queryKey: ["strategies"], queryFn: () => apiFetch<StrategyView[]>("/strategies") });
+  useQuery({ queryKey: ["strategies"], queryFn: () => apiFetch<StrategyView[]>("/strategies"), refetchInterval: 60_000 });
 
 export const useGates = () =>
   useQuery({ queryKey: ["gates"], queryFn: () => apiFetch<Gates>("/reports/gates"), staleTime: 60_000 });

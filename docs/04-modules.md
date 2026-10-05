@@ -160,7 +160,7 @@ APScheduler(AsyncIOScheduler), 잡은 DB에 영속(`SQLAlchemyJobStore`).
 
 | 잡 | 시각(KST) | 동작 |
 | --- | --- | --- |
-| `upbit_daily_exit` | 09:00:00 | 변동성 돌파 보유분 시장가 청산 → 목표가 재계산 → `strategy.status` 발행 |
+| `upbit_daily_exit` | 09:00:00 | 변동성 돌파 보유분 시장가 청산 → 목표가 재계산 → 목표가를 로그로 남김 (scheduler에는 허브가 없다. 화면의 오늘 목표가는 REST `/schedule`, WS `strategy.status`는 엔진이 보낸다 — ADR 0034) |
 | `krx_close_orders` | 15:20:00 (거래일) | GTAA·(월말, 2단계)GEM-KRX 종가 단일가 주문 |
 | `us_orb_entry_window` | 22:35 (서머타임) / 23:35 (표준시) | ORB 진입 창 열기 |
 | `us_eod_exit` | 04:55 (서머타임) / 05:55 (표준시) | ORB 청산 |

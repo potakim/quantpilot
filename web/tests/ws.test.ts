@@ -198,6 +198,26 @@ describe("applyMessage", () => {
     expect(s.seq!.strategy).toBe(1);
   });
 
+  it("strategy.status는 이전 값에 합친다 — 엔진이 보낸 일부 필드만 와도 나머지는 남는다 (ADR 0034)", () => {
+    const first = { ...s0, ...applyMessage(s0, { ch: "strategy.status", ts: "t1", data: { name: "vol_breakout", next_action: { at: "a", what: "b" } } }) };
+    const s = applyMessage(first, {
+      ch: "strategy.status",
+      ts: "t2",
+      data: { name: "vol_breakout", market: "upbit", enabled: false, allocation: 0.15, position: { "KRW-BTC": 0.01 } },
+    });
+    expect(s.strategyStatus!.vol_breakout).toEqual({
+      name: "vol_breakout",
+      market: "upbit",
+      enabled: false,
+      allocation: 0.15,
+      position: { "KRW-BTC": 0.01 },
+      next_action: { at: "a", what: "b" },
+      ts: "t2",
+    });
+    expect(s.seq!.strategy).toBe(2);
+    expect(applyMessage(first, { ch: "strategy.status", ts: "t", data: { enabled: true } })).toEqual({}); // 이름 없으면 버린다
+  });
+
   it("ticks:{m}:{s} → 마지막 가격", () => {
     const s = applyMessage(s0, {
       ch: "ticks:upbit:KRW-BTC",

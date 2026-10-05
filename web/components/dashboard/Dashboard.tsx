@@ -192,7 +192,6 @@ function StrategyTable() {
   const health = useHealth();
   const market = useUi((s) => s.market);
   const toggle = useToggleStrategy();
-  const live = useLive((s) => s.strategyStatus);
   // "페이퍼만": 실전 전환이 잠긴 전략(ORB, 원본 아트보드) + 실전 모드인데 아직 페이퍼로 도는 전략
   const paper = health.data?.paper ?? true;
   const rows = (strategies.data ?? []).filter((s) => market === "all" || s.market === market);
@@ -231,7 +230,8 @@ function StrategyTable() {
           </thead>
           <tbody>
             {rows.map((s, i) => {
-              const enabled = live[s.name]?.enabled ?? s.enabled;
+              // 토글은 저장값 — 엔진 값(WS strategy.status)은 5초 늦게 따라와서 누른 직후 되돌아 보인다 (ADR 0034)
+              const enabled = s.enabled;
               return (
                 <tr key={s.name} className={cx("[&>*]:px-2 [&>*]:py-2.5", i > 0 && "border-t border-bg3")}>
                   <th scope="row" className="text-left font-semibold">

@@ -427,8 +427,37 @@ async def _seed_snapshots(sessions: Any, market: Market, equity: float, cash: fl
         value /= 1 + rng.gauss(0.00004, 0.0025)
 
 
+async def publish_strategy_status(
+    sessions: Any, hub: Any, link: Any, sent: dict[str, dict]
+) -> None:
+    """엔진 대신 업비트 전략 상태를 WS strategy.status로 — 바뀐 전략만 (ADR 0034, 엔진과 같은 모양).
+
+    데모에는 TickRunner가 없어서 엔진이 쓰는 값(저장 설정 + 기본값, 그 전략 보유 수량)을 DB에서 읽어 만든다.
+    """
+    from quantpilot.db.repo import SqlPositionRepo
+    from quantpilot.realtime.bus import message
+    from quantpilot.strategies import REGISTRY, strategy_config
+
+    rows = await link.strategy_configs(UP)
+    held = await SqlPositionRepo(sessions).all(UP)
+    for name, cls in REGISTRY.items():
+        if cls.market != UP:
+            continue
+        cfg = strategy_config(name, rows.get(name))
+        item = {
+            "name": name,
+            "enabled": cfg["enabled"],
+            "allocation": cfg["allocation"],
+            "position": {p.symbol: p.qty for p in held if p.strategy == name and p.qty},
+        }
+        if sent.get(name) == item:
+            continue
+        await hub.publish("strategy.status", message(None, {**item, "market": UP.value}, UP))
+        sent[name] = item
+
+
 async def pulse(sessions: Any, hub: Any, last: dict[str, float], *, engine_alive: bool) -> None:
-    """엔진 대신: 하트비트 · 시세 틱 · 호가 · portfolio를 흘린다."""
+    """엔진 대신: 하트비트 · 시세 틱 · 호가 · portfolio · strategy.status를 흘린다."""
     from quantpilot.db.repo import SqlConfigRepo
     from quantpilot.engine.link import SettingsEngineLink
     from quantpilot.realtime import keys as hk
@@ -437,6 +466,7 @@ async def pulse(sessions: Any, hub: Any, last: dict[str, float], *, engine_alive
 
     link = SettingsEngineLink(SqlConfigRepo(sessions))
     rng = random.Random(7)
+    sent: dict[str, dict] = {}
     n = 0
     while True:
         if engine_alive and n % 30 == 0:
@@ -461,6 +491,8 @@ async def pulse(sessions: Any, hub: Any, last: dict[str, float], *, engine_alive
             if equity is not None:
                 data = {"market": "upbit", "equity": equity}
                 await hub.publish("portfolio", message(None, data))
+            if engine_alive:
+                await publish_strategy_status(sessions, hub, link, sent)
         n += 1
         await asyncio.sleep(1.0)
 

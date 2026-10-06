@@ -39,10 +39,12 @@ app/scripts/deploy.sh                            # pull → db·redis → migrat
 curl -s 127.0.0.1:8000/api/v1/health             # ok·paper=true·engine_alive 확인
 ```
 
+- api 헬스체크는 응답의 `ok`를 본다. `/api/v1/health`는 DB·redis가 실패해도 200에 `ok:false`·`error`로 답하므로, 헬스체크가 `ok`를 봐야 DB·redis 없이 `deploy.sh`가 다음 단계로 넘어가지 않는다(api 단계에서 멈춤 → `docker compose ... logs api`).
+
 - `POSTGRES_PASSWORD`는 DB URL에 그대로 들어가므로 URL에 안전한 문자로 만든다(예: `openssl rand -hex 24`). `QP_JWT_SECRET`은 32바이트 이상.
 - compose가 `QP_PAPER=true`를 못박는다. env 파일 값으로 실전으로 바뀌지 않는다.
 - db·redis는 호스트 포트가 없고 api는 `127.0.0.1:8000`에만 열린다. 밖에서 볼 때는 `ssh -L 8000:127.0.0.1:8000 vps` 또는 HTTPS 앞단(후속 카드).
-- 업데이트: `app/scripts/deploy.sh --tag <커밋 sha>`(기본 `latest`). engine 재시작 전 가드가 위 규칙(ADR 0029)을 확인하고, 걸리면 api·scheduler까지만 갱신한 뒤 멈춘다. 그래도 진행하려면 `--force`. `--dry-run`도 docker가 있으면 `compose config`로 설정을 실제로 검사한다.
+- 업데이트: `app/scripts/deploy.sh --tag <커밋 40자 sha>`(기본 `latest`). CI는 main에 머지된 커밋만 이미지를 올리고 태그는 40자 sha와 `latest`다 — 짧은 sha는 pull이 실패한다. 머지 전 커밋은 `--build`. engine 재시작 전 가드가 위 규칙(ADR 0029)을 확인하고, 걸리면 api·scheduler까지만 갱신한 뒤 멈춘다. 그래도 진행하려면 `--force`. `--dry-run`도 docker가 있으면 `compose config`로 설정을 실제로 검사한다.
 - 이미지를 VPS에서 직접 만들 때는 `--build`.
 - 관문 G1 증거 기록(ADR 0030) — 첫 배포 후 한 번. 그 뒤로는 전략·파라미터를 바꿀 때마다 다시 실행한다. 데이터 캐시는 `appdata` 볼륨에 남는다:
   ```bash
@@ -56,7 +58,7 @@ curl -s 127.0.0.1:8000/api/v1/health             # ok·paper=true·engine_alive 
 
 ### 2.2 백업·복원
 
-- cron(KST 03:30): `30 3 * * * /opt/quantpilot/app/scripts/backup.sh --remote <rclone 대상> >> /opt/quantpilot/backup.log 2>&1` (VPS 시간대가 UTC면 `30 18 * * *`).
+- cron(KST 03:30): `30 3 * * * /opt/quantpilot/app/scripts/backup.sh --remote <rclone 대상> >> /opt/quantpilot/backup.log 2>&1` (VPS 시간대가 UTC면 `30 18 * * *`). `--remote`를 쓰려면 호스트에 rclone을 설치하고 `rclone config`로 대상을 먼저 만든다.
 - 담는 것: `qp-db-<시각>.dump`(`pg_dump -Fc`), `qp-data-<시각>.tar.gz`(`data/`). **`data/keys.env`·`.env`는 담지 않는다** — 키는 따로 보관한다. `data/cache`도 뺀다.
 - 30일 지난 백업은 스크립트가 지운다(`--keep-days`로 조정).
 - 복원(하이퍼테이블 포함):
@@ -69,8 +71,13 @@ docker compose -p qp-paper -f app/deploy/compose.yml --env-file .env exec -T db 
   pg_restore -U quantpilot -d quantpilot --clean --if-exists < backups/qp-db-<시각>.dump
 docker compose -p qp-paper -f app/deploy/compose.yml --env-file .env exec -T db \
   psql -U quantpilot -d quantpilot -c "select timescaledb_post_restore();"
+# data/ (appdata 볼륨) — 멈춘 api 대신 일회용 컨테이너로 푼다
+docker compose -p qp-paper -f app/deploy/compose.yml --env-file .env run --rm --no-deps -T api   tar -C /app/data -xzf - < backups/qp-data-<시각>.tar.gz
 app/scripts/deploy.sh
 ```
+
+- 백업에는 `data/keys.env`가 없다. 화면(설정 · API 키)에서 등록했던 키는 복원 뒤 다시 등록하거나 `.env`에 넣는다.
+- `timescaledb_pre/post_restore`는 덤프를 만든 TimescaleDB와 같은 버전에서 돌려야 한다 — `QP_TIMESCALE_IMAGE`를 고정해 두는 이유.
 
 - 개발 PC(SQLite): `scripts/backup.sh --sqlite data/quantpilot.db --data-dir data --out backups`.
 
@@ -110,7 +117,7 @@ scheduler 잡은 `quantpilot/scheduler/registry.py`의 `JOBS`가 기준이다. �
 
 ## 5. 모니터링
 
-- 헬스: `/health`를 외부 업타임 모니터(1분)로. `engine_alive`가 false면 알림.
+- 헬스: `/api/v1/health`의 `ok`·`engine_alive`가 false면 알림. api는 `127.0.0.1`에만 열려 있어 외부 업타임 모니터는 바로 못 본다 — HTTPS 앞단을 두기 전에는 VPS 안 cron(1분)으로 `curl -s 127.0.0.1:8000/api/v1/health`를 확인한다.
 - 메트릭(Prometheus, 2단계): 틱 지연, 판단 모델 지연·타임아웃율, 주문 오류율, WS 재접속 수, AI 비용.
 - 로그: `docker logs`(json-file 드라이버, 위 §4). 엔진·scheduler·API 모두 `quantpilot/logsetup.py`를 쓴다(t47).
   - 형식은 `QP_LOG_FORMAT`으로 고른다. 배포 compose는 `json`, 로컬 기본은 `text`다.

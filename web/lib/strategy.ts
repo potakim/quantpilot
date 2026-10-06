@@ -25,6 +25,23 @@ export const PAPER_ONLY: Record<string, string> = {
   orb: "슬리피지 2¢ 포함 샤프 > 0.5",
 };
 
+export interface ModeBadge {
+  label: string;
+  tone: "warn" | "up" | "muted";
+  hint?: string; // 카드 부제 아래 한 줄 설명
+}
+
+/** 전략 카드의 실전/페이퍼 배지. appPaper = /health의 전체 모드(모르면 undefined → 배지 없음).
+ * 페이퍼 모드에서는 모든 주문이 페이퍼라 보통 전략엔 배지를 달지 않는다(헤더가 이미 "페이퍼 모드"). */
+export function modeBadge(s: Pick<StrategyView, "name" | "paper">, appPaper: boolean | undefined): ModeBadge | null {
+  if (PAPER_ONLY[s.name]) return { label: "페이퍼 전용", tone: "warn" };
+  if (appPaper === undefined) return null;
+  if (!appPaper) return s.paper ? { label: "페이퍼만", tone: "warn" } : { label: "실전", tone: "up" };
+  return s.paper
+    ? null
+    : { label: "실전 전환됨", tone: "muted", hint: "지금은 페이퍼 모드라 페이퍼로 실행됩니다" };
+}
+
 // 배분 바 색 (화면 원본): 장기 파랑 두 가지, 단타는 강조색(보라), 현금은 bg-4
 const SEGMENT_COLOR: Record<string, string> = {
   gem: "bg-down",

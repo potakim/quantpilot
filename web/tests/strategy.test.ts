@@ -7,6 +7,7 @@ import {
   g1Summary,
   judgeSavedNote,
   llmModels,
+  modeBadge,
   orderStrategies,
   paramControls,
   paramsDiffer,
@@ -166,5 +167,29 @@ describe("AI 판단 설정", () => {
     expect(restartPending(judge({ provider: "typesafe" }))).toBe(true);
     expect(restartPending(judge({ llm_models: ["claude", "stub"] }))).toBe(true);
     expect(restartPending(judge({ active: null, provider: "typesafe" }))).toBe(false);
+  });
+});
+
+describe("modeBadge", () => {
+  it("페이퍼 전용 전략은 모드와 무관하게 '페이퍼 전용'", () => {
+    for (const app of [true, false, undefined]) {
+      expect(modeBadge({ name: "orb", paper: false }, app)).toEqual({ label: "페이퍼 전용", tone: "warn" });
+    }
+  });
+
+  it("실전 모드에서는 전략별로 '페이퍼만' / '실전' (대시보드와 같은 말)", () => {
+    expect(modeBadge({ name: "gem", paper: true }, false)).toEqual({ label: "페이퍼만", tone: "warn" });
+    expect(modeBadge({ name: "vol_breakout", paper: false }, false)).toEqual({ label: "실전", tone: "up" });
+  });
+
+  it("페이퍼 모드의 보통 전략은 배지 없음, 실전으로 바꿔 둔 전략만 따로 알린다", () => {
+    expect(modeBadge({ name: "gem", paper: true }, true)).toBeNull();
+    const b = modeBadge({ name: "vol_breakout", paper: false }, true);
+    expect(b?.label).toBe("실전 전환됨");
+    expect(b?.hint).toContain("페이퍼로 실행");
+  });
+
+  it("전체 모드를 아직 모르면 배지 없음", () => {
+    expect(modeBadge({ name: "gem", paper: true }, undefined)).toBeNull();
   });
 });

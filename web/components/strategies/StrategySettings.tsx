@@ -8,7 +8,7 @@ import { IconLock } from "@/components/ui/Icons";
 import { Card, CardSkeleton, ErrorNote, cx } from "@/components/ui/primitives";
 import { reasonText } from "@/lib/api";
 import { fmtKrw, fmtPct } from "@/lib/format";
-import { useLiveMarkets, usePortfolio, useSettings, useStrategies } from "@/lib/queries";
+import { useHealth, useLiveMarkets, usePortfolio, useSettings, useStrategies } from "@/lib/queries";
 import { allocationSegments, allocationSummary, orderStrategies } from "@/lib/strategy";
 import type { RiskRulesView, StrategyView } from "@/lib/types";
 import { useUi } from "@/lib/ui-store";
@@ -21,6 +21,7 @@ export function StrategySettings() {
   const portfolio = usePortfolio();
   const settings = useSettings();
   const live = useLiveMarkets();
+  const appPaper = useHealth().data?.paper;
   const tab = useUi((s) => s.market);
   const list = orderStrategies(strategies.data ?? []);
   const cards = list.filter((s) => tab === "all" || s.market === tab);
@@ -48,6 +49,7 @@ export function StrategySettings() {
                   all={list}
                   capital={portfolio.data?.by_market[s.market]?.equity ?? null}
                   live={live.has(s.market)}
+                  appPaper={appPaper}
                   maxIntraday={maxIntraday}
                 />
               ))}

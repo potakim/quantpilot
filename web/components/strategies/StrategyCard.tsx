@@ -18,6 +18,7 @@ import {
   allocationMax,
   formatParam,
   g1Summary,
+  modeBadge,
   paramControls,
   paramsDiffer,
   snap,
@@ -53,12 +54,14 @@ export function StrategyCard({
   all,
   capital,
   live,
+  appPaper,
   maxIntraday,
 }: {
   s: StrategyView;
   all: StrategyView[];
   capital: number | null;
   live: boolean;
+  appPaper: boolean | undefined;
   maxIntraday: number;
 }) {
   // 끄는 중인 값 (놓기 전까지 화면에만). 저장이 끝나면 서버 값으로 돌아간다
@@ -75,6 +78,7 @@ export function StrategyCard({
   const allocMax = allocationMax(all, s.name, maxIntraday);
   const g1 = g1Summary(s.gate.g1?.evidence);
   const g2Rule = PAPER_ONLY[s.name];
+  const mode = modeBadge(s, appPaper);
   const title = STRATEGY_TITLE[s.name] ?? s.name;
   const symbolsLabel = s.market === "upbit" ? "대상 코인" : "자산";
   const intraday = s.horizon === "intraday";
@@ -94,10 +98,11 @@ export function StrategyCard({
         <div className="flex min-w-0 flex-col gap-0.5">
           <h2 className="flex flex-wrap items-center gap-2 text-sm font-semibold">
             {title}
-            {g2Rule ? <Badge tone="warn">페이퍼 전용</Badge> : null}
+            {mode ? <Badge tone={mode.tone}>{mode.label}</Badge> : null}
             {!live ? <Badge tone="muted">2단계 예정</Badge> : null}
           </h2>
           <p className="text-[11px] text-muted">{STRATEGY_SUBTITLE[s.name] ?? marketLabel(s.market)}</p>
+          {mode?.hint ? <p className="text-[11px] text-muted">{mode.hint}</p> : null}
         </div>
         <Toggle
           checked={s.enabled}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,6 +20,7 @@ class Settings(BaseSettings):
     )
 
     env: str = "dev"
+    log_format: Literal["text", "json"] = "text"  # 배포 compose는 json (07 §5, logsetup.py)
     data_dir: Path = Path("data")
     initial_cash_krw: float = 10_000_000
     initial_cash_usd: float = 10_000

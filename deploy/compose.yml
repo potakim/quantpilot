@@ -20,6 +20,7 @@ x-app: &app
   environment:
     QP_ENV: paper
     QP_PAPER: "true"
+    QP_LOG_FORMAT: json  # 한 줄 JSON 로그 (docker logs | jq, 07 §5)
     QP_DATA_DIR: /app/data
     QP_DATABASE_URL: postgresql+asyncpg://quantpilot:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 필요}@db:5432/quantpilot
     QP_REDIS_URL: redis://redis:6379/0

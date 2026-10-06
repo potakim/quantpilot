@@ -88,6 +88,7 @@ app/scripts/deploy.sh
 | `QP_JWT_SECRET` | 32바이트 이상 |
 | `QP_TELEGRAM_BOT_TOKEN`, `QP_TELEGRAM_CHAT_ID` | 알림 |
 | `QP_AI_BUDGET_USD_DAILY` | 기본 2 |
+| `QP_LOG_FORMAT` | `text`(기본) / `json`. 배포 compose는 `json`을 못박는다(§5) |
 | `QP_NEWS_FILE` | 뉴스 피드·키워드 YAML. 비우면 패키지 기본값 `quantpilot/data/news_sources.yaml` (ADR 0021) |
 | `QP_EVENTS_FILE` | 이벤트 캘린더 YAML(FOMC·CPI·금통위·업비트 점검). paper compose는 저장소의 `deploy/events.yaml`을 `/app/config/events.yaml`로 꽂고 이 값을 고정한다 — 일정 갱신은 그 파일을 PR로 고친다. 로컬 기본 `data/events.yaml`, 없으면 빈 캘린더 |
 | `QP_UPBIT_*`, `QP_KIS_*`, `QP_ALPACA_*`, `QP_TYPESAFE_API_KEY`, `QP_ANTHROPIC_API_KEY`, `QP_GOOGLE_API_KEY`, `QP_DART_API_KEY` | 외부 키. Gemini 키가 없으면 뉴스 요약은 제목 절단, Claude 키가 없으면 일일 리뷰는 통계만 (ADR 0021) |
@@ -111,7 +112,14 @@ scheduler 잡은 `quantpilot/scheduler/registry.py`의 `JOBS`가 기준이다. �
 
 - 헬스: `/health`를 외부 업타임 모니터(1분)로. `engine_alive`가 false면 알림.
 - 메트릭(Prometheus, 2단계): 틱 지연, 판단 모델 지연·타임아웃율, 주문 오류율, WS 재접속 수, AI 비용.
-- 로그: `docker logs`(json-file 드라이버, 위 §4). 엔진·scheduler는 `quantpilot/logsetup.py`(logging 기본 텍스트 형식)를 쓰고, API는 uvicorn 기본 형식이다. 지금은 `extra={...}` 구조화 필드가 출력에 찍히지 않는다 — JSON 라인 출력은 "로그 구조화" 카드에서 한다(예정). httpx·httpcore 로거는 URL에 키가 실릴 수 있어 WARNING으로 올려 둔다(불변식 #10). 레벨: 주문·체결·리스크 이벤트는 INFO.
+- 로그: `docker logs`(json-file 드라이버, 위 §4). 엔진·scheduler·API 모두 `quantpilot/logsetup.py`를 쓴다(t47).
+  - 형식은 `QP_LOG_FORMAT`으로 고른다. 배포 compose는 `json`, 로컬 기본은 `text`다.
+    - `json`: 한 줄에 JSON 하나 — `{"ts": UTC ISO, "level", "logger", "msg", …extra 필드, "exc": 예외}`. 예: `docker compose logs engine --no-log-prefix | jq 'select(.symbol=="KRW-BTC")'`.
+    - `text`: `시각 레벨 로거: 메시지 key=value …`.
+  - 두 형식 모두 `extra={...}` 구조화 필드를 싣는다. 필드 이름에 key·secret·token·password가 들어가면 값을 `***`로 가린다. 알림 중복 키는 그래서 `alert` 필드로 남긴다.
+  - API(uvicorn)는 `json`일 때 시작하면서 uvicorn 로그도 같은 형식으로 돌린다.
+  - httpx·httpcore 로거는 URL에 키가 실릴 수 있어 WARNING으로 올려 둔다(불변식 #10).
+  - 레벨: 주문·체결·리스크 이벤트는 INFO.
 - 화면 상단 상태 표시:
   - 헤더는 연결 상태 한 줄(API 끊김 / 엔진 응답 없음 / 실시간 재연결 중 / 시세 수신 없음 / "업비트 연결됨")과 페이퍼·실전 배지를 보인다.
   - 할트는 대시보드 할트 배너에, 오늘 AI 비용은 대시보드 AI 판단 카드에 보인다.

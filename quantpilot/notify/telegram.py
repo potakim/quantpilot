@@ -40,7 +40,7 @@ class LogNotifier:
     async def send(self, level: str, text: str, *, key: str | None = None) -> None:
         """level에 맞는 로그 레벨로 남긴다. critical도 error로 — CriticalLogHandler 재귀를 막는다."""
         lv = logging.ERROR if level == "critical" else logging.getLevelName(level.upper())
-        log.log(lv, text, extra={"notify": level, "key": key})
+        log.log(lv, text, extra={"notify": level, "alert": key})
 
     async def resolve(self, key: str) -> None:
         """반복이 없으니 할 일 없음."""
@@ -85,9 +85,9 @@ class TelegramNotifier:
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
                     resp = await client.post(url, json=body)
             if resp.status_code >= 400:
-                log.error("telegram send failed", extra={"status": resp.status_code, "key": key})
+                log.error("telegram send failed", extra={"status": resp.status_code, "alert": key})
         except Exception as e:  # noqa: BLE001 — 예외 메시지엔 URL(토큰)이 섞이므로 타입만
-            log.error("telegram send failed", extra={"error": type(e).__name__, "key": key})
+            log.error("telegram send failed", extra={"error": type(e).__name__, "alert": key})
 
     async def resolve(self, key: str) -> None:
         """반복은 RepeatingNotifier 몫."""

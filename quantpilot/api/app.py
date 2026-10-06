@@ -110,6 +110,10 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if getattr(settings, "log_format", "text") == "json":
+            from quantpilot.logsetup import setup_logging
+
+            setup_logging(fmt="json", uvicorn=True)  # uvicorn 로그도 같은 JSON 한 줄로 (07 §5)
         yield
         await app.state.wshub.stop()
         for t in list(app.state.tasks):

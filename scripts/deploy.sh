@@ -4,9 +4,10 @@
 #   scripts/deploy.sh [--tag TAG] [--web] [--build] [--force] [--dry-run] [--env-file PATH]
 #
 # 순서: 이미지 pull(또는 build) → db·redis → migrate(alembic upgrade head) → api → (web) → scheduler → engine
-# engine은 열린 포지션이 없고 KRX 장중(KST 09:05~15:15)이 아닐 때만 재시작한다.
-# 걸리면 api·scheduler까지만 갱신하고 멈춘다 — 그래도 진행하려면 --force.
-# 롤백은 이전 태그로 다시 실행: scripts/deploy.sh --tag <이전 sha>
+# engine은 재시작 가드(ADR 0029)가 막지 않을 때만 재시작한다 — 1단계는 업비트 시간 청산 앞뒤(KST 08:55~09:05)만
+# 막고, 업비트 포지션은 재시작 뒤 복원된다(ADR 0028). 걸리면 api·scheduler까지만 갱신하고 멈춘다 — 진행하려면 --force.
+# api 헬스체크는 응답의 ok를 본다 — DB·redis가 안 붙으면 api 단계에서 멈춘다.
+# 태그는 CI가 붙인 40자 커밋 sha 또는 latest. 롤백: scripts/deploy.sh --tag <이전 커밋 40자 sha>
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,7 +19,7 @@ FORCE=0
 DRY_RUN=0
 
 usage() {
-  sed -n '2,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 while [[ $# -gt 0 ]]; do

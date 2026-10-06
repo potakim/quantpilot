@@ -85,6 +85,22 @@ def test_compose_start_order(compose):
     assert "/api/v1/health" in " ".join(s["api"]["healthcheck"]["test"])
 
 
+@pytest.mark.parametrize(
+    ("body", "code"), [(b'{"ok": true}', 0), (b'{"ok": false, "error": "OSError"}', 1)]
+)
+def test_api_healthcheck_reads_ok(compose, monkeypatch, body, code):
+    """/health는 DB·redis가 죽어도 200이다 — 헬스체크가 ok를 봐야 deploy.sh의 `up --wait api`가 멈춘다."""
+    import io
+    import urllib.request
+
+    test = compose["services"]["api"]["healthcheck"]["test"]
+    assert test[:3] == ["CMD", "python", "-c"]
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout: io.BytesIO(body))
+    with pytest.raises(SystemExit) as exc:
+        exec(test[3], {})  # noqa: S102 — compose에 적힌 헬스체크 문자열을 그대로 돌린다
+    assert exc.value.code == code
+
+
 def test_compose_env_refs_are_documented():
     """compose가 읽는 ${VAR} 중 env 파일에서 와야 하는 것은 .env.example에 있다."""
     refs = set(re.findall(r"\$\{([A-Z_]+)", COMPOSE.read_text(encoding="utf-8")))

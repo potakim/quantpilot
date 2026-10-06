@@ -80,12 +80,14 @@ services:
     command: ["uvicorn", "quantpilot.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "127.0.0.1:${QP_API_PORT:-8000}:8000"
+    # /api/v1/health는 DB·redis가 실패해도 200에 ok:false로 답한다 — 응답의 ok를 봐야
+    # deploy.sh의 `up --wait api`가 DB·redis 없이 다음 단계로 넘어가지 않는다 (07 §2.1)
     healthcheck:
       test:
         - CMD
         - python
         - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"
+        - "import json, sys, urllib.request; sys.exit(0 if json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)).get('ok') else 1)"
       interval: 30s
       timeout: 5s
       retries: 3

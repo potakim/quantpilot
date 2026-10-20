@@ -1,7 +1,6 @@
 """P1-05 OrderExecutor·RateLimiter·PersistentPaperBroker (04 §5, ADR 0011)."""
 
 # 엔진 시각은 시장 현지 tz-naive가 규칙이다 (CLAUDE.md, ADR 0009)
-# ruff: noqa: DTZ001
 
 from __future__ import annotations
 

@@ -27,8 +27,8 @@ def _record(msg: str = "주문 체결", exc: bool = False, **extra) -> logging.L
 
 def test_json_line_has_fields_extra_and_masks_secrets():
     rec = _record(
-        symbol="KRW-BTC", strategy="vol_breakout", qty=0.01, api_key="sk-REAL", token="T1"
-    )
+        symbol="KRW-BTC", strategy="vol_breakout", qty=0.01, api_key="sk-REAL", token="tok-REAL"
+    )  # 가짜 비밀은 ts(…T14:…)와 겹치지 않는 값으로 — "T1"은 UTC 10~19시에 ts와 겹쳤다
     line = JsonFormatter().format(rec)
     assert "\n" not in line  # 한 줄
     out = json.loads(line)
@@ -40,7 +40,7 @@ def test_json_line_has_fields_extra_and_masks_secrets():
     assert out["ts"].endswith("+00:00")  # UTC
     assert (out["symbol"], out["strategy"], out["qty"]) == ("KRW-BTC", "vol_breakout", 0.01)
     assert out["api_key"] == MASK and out["token"] == MASK
-    assert "sk-REAL" not in line and "T1" not in line
+    assert "sk-REAL" not in line and "tok-REAL" not in line
 
 
 def test_json_line_carries_exception_and_odd_values():

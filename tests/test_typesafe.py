@@ -59,7 +59,7 @@ def _signal() -> SignalEvent:
         "vol_breakout",
         Target("KRW-ETH", 0.2),
         "entry",
-        datetime(2026, 9, 30, 9, 5),  # noqa: DTZ001 — 시장 현지 tz-naive
+        datetime(2026, 9, 30, 9, 5),  # 시장 현지 tz-naive
         signal_id=7,
     )
 

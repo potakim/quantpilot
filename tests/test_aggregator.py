@@ -1,7 +1,6 @@
 """P1-03 캔들 집계: 마감 규칙(다음 봉 첫 체결 또는 마감+2초), OHLCV, 늦은 체결, 일봉 경계."""
 
 # 엔진 시각은 시장 현지 tz-naive가 규칙이다 (CLAUDE.md, ADR 0009)
-# ruff: noqa: DTZ001
 
 from __future__ import annotations
 

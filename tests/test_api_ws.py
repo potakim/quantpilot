@@ -5,8 +5,6 @@
 - 불변식 #9: API가 넣은 큐 항목을 엔진이 OrderExecutor(리스크 재검사 → 브로커)로 실행
 """
 
-# ruff: noqa: DTZ001
-
 from __future__ import annotations
 
 import asyncio

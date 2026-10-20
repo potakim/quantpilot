@@ -72,7 +72,8 @@ docker compose -p qp-paper -f app/deploy/compose.yml --env-file .env exec -T db 
 docker compose -p qp-paper -f app/deploy/compose.yml --env-file .env exec -T db \
   psql -U quantpilot -d quantpilot -c "select timescaledb_post_restore();"
 # data/ (appdata 볼륨) — 멈춘 api 대신 일회용 컨테이너로 푼다
-docker compose -p qp-paper -f app/deploy/compose.yml --env-file .env run --rm --no-deps -T api   tar -C /app/data -xzf - < backups/qp-data-<시각>.tar.gz
+docker compose -p qp-paper -f app/deploy/compose.yml --env-file .env run --rm --no-deps -T api \
+  tar -C /app/data -xzf - < backups/qp-data-<시각>.tar.gz
 app/scripts/deploy.sh
 ```
 
@@ -119,7 +120,7 @@ scheduler 잡은 `quantpilot/scheduler/registry.py`의 `JOBS`가 기준이다. �
 
 - 헬스: `/api/v1/health`의 `ok`·`engine_alive`가 false면 알림. api는 `127.0.0.1`에만 열려 있어 외부 업타임 모니터는 바로 못 본다 — HTTPS 앞단을 두기 전에는 VPS 안 cron(1분)으로 `curl -s 127.0.0.1:8000/api/v1/health`를 확인한다.
 - 메트릭(Prometheus, 2단계): 틱 지연, 판단 모델 지연·타임아웃율, 주문 오류율, WS 재접속 수, AI 비용.
-- 로그: `docker logs`(json-file 드라이버, 위 §4). 엔진·scheduler·API 모두 `quantpilot/logsetup.py`를 쓴다(t47).
+- 로그: `docker logs`(json-file 드라이버, 위 §4). 엔진·scheduler는 늘, API는 `json`일 때 `quantpilot/logsetup.py`를 쓴다(t47). 로컬 `text`의 API 로그는 uvicorn 기본 출력 그대로다.
   - 형식은 `QP_LOG_FORMAT`으로 고른다. 배포 compose는 `json`, 로컬 기본은 `text`다.
     - `json`: 한 줄에 JSON 하나 — `{"ts": UTC ISO, "level", "logger", "msg", …extra 필드, "exc": 예외}`. 예: `docker compose logs engine --no-log-prefix | jq 'select(.symbol=="KRW-BTC")'`.
     - `text`: `시각 레벨 로거: 메시지 key=value …`.

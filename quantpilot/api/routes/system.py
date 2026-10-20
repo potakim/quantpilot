@@ -235,7 +235,8 @@ async def patch_settings(
         raise ApiError(400, "INVALID_PARAM", "gate.hold_below < gate.full_above 이어야 한다")
     for k, v in clean.items():
         await config.set_setting(k, v)
-    log.info("settings patched", extra={"keys": sorted(clean)})
+    # 필드 이름이 "keys"면 비밀 가리기(logsetup)에 걸려 *** 가 된다 — 설정 이름일 뿐이라 fields로
+    log.info("settings patched", extra={"fields": sorted(clean)})
     return {"updated": sorted(clean)}
 
 

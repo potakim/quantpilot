@@ -231,6 +231,21 @@ async def test_patch_settings_allowed_keys(ctx):
         assert await config.get_setting(k) == v
 
 
+async def test_patch_settings_log_keeps_field_names(ctx, caplog):
+    """바꾼 설정 이름은 비밀이 아니다 — JSON 로그에서 *** 로 가려지면 안 된다 (07 §5)."""
+    import json
+
+    from quantpilot.logsetup import JsonFormatter
+
+    with caplog.at_level(logging.INFO, logger="quantpilot.api.routes.system"):
+        r = await ctx.client.patch(
+            f"{API}/settings", json={"notify.level": "warning"}, headers=ctx.h
+        )
+    assert r.status_code == 200, r.text
+    rec = next(x for x in caplog.records if x.getMessage() == "settings patched")
+    assert json.loads(JsonFormatter().format(rec))["fields"] == ["notify.level"]
+
+
 @pytest.mark.parametrize(
     "patch",
     [

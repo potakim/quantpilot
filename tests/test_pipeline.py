@@ -1,7 +1,6 @@
 """P1-08 LLM 리뷰어(Claude·Gemini) + JudgmentPipeline. 가짜 SDK 클라이언트로 결정적으로 돈다."""
 
 # 시각은 시장 현지 tz-naive (core/clock.py 규칙)
-# ruff: noqa: DTZ001
 
 from __future__ import annotations
 

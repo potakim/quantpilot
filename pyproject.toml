@@ -48,7 +48,8 @@ infra = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
-    "ruff>=0.5",
+    # 새 마이너 버전이 규칙을 바꿔 CI가 갑자기 깨진 적이 있다(0.17의 RUF100, t50) — 올릴 때는 일부러
+    "ruff>=0.17,<0.18",
     # DB 테스트(SQLite 인메모리)가 기본 설치에서 건너뛰지 않도록 (P1-01)
     "sqlalchemy[asyncio]>=2.0",
     "alembic>=1.13",

@@ -1,7 +1,6 @@
 """P1-03 업비트 웹소켓: 메시지 해석, 재접속 백오프, 무응답 → DataStale. 가짜 서버로 결정적으로 돈다."""
 
 # 엔진 시각은 시장 현지 tz-naive가 규칙이다 (CLAUDE.md, ADR 0009)
-# ruff: noqa: DTZ001
 
 from __future__ import annotations
 

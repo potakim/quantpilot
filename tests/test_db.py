@@ -1,7 +1,6 @@
 """P1-01 DB 계층: alembic 마이그레이션, dataclass↔ORM 왕복, repo 단위 테스트(SQLite 인메모리)."""
 
 # 엔진 시각은 시장 현지 tz-naive가 규칙이다 (CLAUDE.md, ADR 0009)
-# ruff: noqa: DTZ001
 
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path

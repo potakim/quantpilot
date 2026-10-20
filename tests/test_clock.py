@@ -1,7 +1,6 @@
 """P1-02 MarketClock·캘린더·이벤트·오류 타입 (04 §1, 05 §5, ADR 0009)."""
 
 # 엔진 시각은 시장 현지 tz-naive가 규칙이다 (CLAUDE.md, ADR 0009)
-# ruff: noqa: DTZ001
 
 import ast
 import dataclasses

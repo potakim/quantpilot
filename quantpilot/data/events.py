@@ -53,7 +53,7 @@ def _to_utc(value: Any, market: str | None) -> datetime:
     if isinstance(value, datetime):
         ts = value
     elif isinstance(value, date):
-        ts = datetime(value.year, value.month, value.day)  # noqa: DTZ001 — 아래에서 현지→UTC
+        ts = datetime(value.year, value.month, value.day)  # 아래에서 현지→UTC
     else:
         ts = datetime.fromisoformat(str(value))
     if ts.tzinfo is not None:

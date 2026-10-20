@@ -1,7 +1,6 @@
 """P1-03 CandleStore: SQLite 인메모리로 upsert·load·캐시, 현지시간↔UTC 왕복."""
 
 # 엔진 시각은 시장 현지 tz-naive가 규칙이다 (CLAUDE.md, ADR 0009)
-# ruff: noqa: DTZ001
 
 from __future__ import annotations
 

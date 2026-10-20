@@ -332,7 +332,7 @@ def test_market_engine_groups_bars_of_one_bucket_into_one_tick():
             self.batches.append(sorted(e.symbol for e in evs))
 
     class Clock:
-        now_ts = datetime(2021, 1, 4, 10, 0, 30)  # noqa: DTZ001 — 시장 현지 tz-naive
+        now_ts = datetime(2021, 1, 4, 10, 0, 30)  # 시장 현지 tz-naive
 
         def now(self):
             return self.now_ts
@@ -342,15 +342,15 @@ def test_market_engine_groups_bars_of_one_bucket_into_one_tick():
 
     def tr(sym, hh_mm_ss, px=100.0):
         h, m, s = hh_mm_ss
-        return TradeEvent(Market.UPBIT, sym, datetime(2021, 1, 4, h, m, s), px, 1.0)  # noqa: DTZ001
+        return TradeEvent(Market.UPBIT, sym, datetime(2021, 1, 4, h, m, s), px, 1.0)
 
     async def go():
         await eng.on_trade(tr("A", (10, 0, 10)))
         await eng.on_trade(tr("B", (10, 0, 20)))
         await eng.on_trade(tr("A", (10, 1, 0)))  # A의 10:00 봉 즉시 확정
-        clock.now_ts = datetime(2021, 1, 4, 10, 1, 1)  # noqa: DTZ001 — 아직 grace(2초) 안
+        clock.now_ts = datetime(2021, 1, 4, 10, 1, 1)  # 아직 grace(2초) 안
         assert await eng.on_timer() == 0
-        clock.now_ts = datetime(2021, 1, 4, 10, 1, 2)  # noqa: DTZ001
+        clock.now_ts = datetime(2021, 1, 4, 10, 1, 2)
         assert await eng.on_timer() == 2
 
     asyncio.run(go())
